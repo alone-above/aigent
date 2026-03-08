@@ -30,6 +30,26 @@ dp = Dispatcher(storage=storage)
 router = Router()
 dp.include_router(router)
 
+# ==================== Animated Emoji ====================
+# Animated emoji helper: renders as animated sticker in Telegram
+E = {
+    "shop":     '<tg-emoji emoji-id="5373052667671093676">🛍</tg-emoji>',
+    "question": '<tg-emoji emoji-id="5467666648263564704">❓</tg-emoji>',
+    "down":     '<tg-emoji emoji-id="5470177992950946662">👇</tg-emoji>',
+    "folder":   '<tg-emoji emoji-id="5433653135799228968">📁</tg-emoji>',
+    "money":    '<tg-emoji emoji-id="5472030678633684592">💸</tg-emoji>',
+    "cart":     '<tg-emoji emoji-id="5431499171045581032">🛒</tg-emoji>',
+    "calendar": '<tg-emoji emoji-id="5431897022456145283">📆</tg-emoji>',
+    "id":       '<b>ID</b>',
+    "archive":  '<tg-emoji emoji-id="5431736674147114227">🗂</tg-emoji>',
+    "store":    '<tg-emoji emoji-id="5265105755677159697">🏬</tg-emoji>',
+    "support":  '<tg-emoji emoji-id="5467666648263564704">❓</tg-emoji>',
+}
+
+def ae(key: str) -> str:
+    """Return animated emoji HTML by key."""
+    return E.get(key, "")
+
 DB_PATH = "shop.db"
 
 
@@ -307,7 +327,7 @@ async def check_invoice(invoice_id: str):
 def main_keyboard():
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🛒 Купить"), KeyboardButton(text="👤 Мой профиль")],
-        [KeyboardButton(text="🏬 О шопе"), KeyboardButton(text="🛟 Поддержка")]
+        [KeyboardButton(text="🏬 О шопе"), KeyboardButton(text="❓ Поддержка")]
     ], resize_keyboard=True)
 
 
@@ -362,7 +382,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
     await add_user(message.from_user)
     await set_commands(message.from_user.id)
-    text = f"🏪 <b>{SHOP_NAME}</b>\n\n<blockquote>👇 Выберите действие:</blockquote>"
+    text = f"{ae('shop')} <b>{SHOP_NAME}</b>\n\n<blockquote>{ae('down')} Выберите действие:</blockquote>"
     await message.answer(text, parse_mode="HTML", reply_markup=main_keyboard())
 
 
@@ -378,7 +398,7 @@ async def cmd_admin(message: types.Message, state: FSMContext):
 @router.callback_query(F.data == "main")
 async def cb_main(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    text = f"🏪 <b>{SHOP_NAME}</b>\n\n<blockquote>👇 Выберите действие:</blockquote>"
+    text = f"{ae('shop')} <b>{SHOP_NAME}</b>\n\n<blockquote>{ae('down')} Выберите действие:</blockquote>"
     try:
         await callback.message.delete()
     except:
@@ -400,7 +420,7 @@ async def text_shop(message: types.Message):
         keyboard.append([InlineKeyboardButton(text=f"📂 {cat['name']}", callback_data=f"cat_{cat['id']}")])
     keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="main")])
 
-    text = "🛒 <b>Каталог товаров</b>\n\n<blockquote>👇 Выберите категорию:</blockquote>"
+    text = f"{ae('cart')} <b>Каталог товаров</b>\n\n<blockquote>{ae('down')} Выберите категорию:</blockquote>"
     await send_with_media(message.chat.id, text, "shop_menu", InlineKeyboardMarkup(inline_keyboard=keyboard))
 
 
@@ -410,10 +430,10 @@ async def text_profile(message: types.Message):
     purchases = await get_user_purchases(message.from_user.id)
 
     text = f"👤 <b>Мой профиль</b>\n\n"
-    text += f"🆔 <b>ID:</b> <code>{message.from_user.id}</code>\n"
-    text += f"🛒 <b>Покупок:</b> {user['total_purchases']}\n"
-    text += f"💵 <b>Потрачено:</b> ${user['total_spent']:.2f}\n"
-    text += f"📅 <b>Регистрация:</b> {user['registered_at'][:10]}\n"
+    text += f"{ae('id')} <b>ID:</b> <code>{message.from_user.id}</code>\n"
+    text += f"{ae('cart')} <b>Покупок:</b> {user['total_purchases']}\n"
+    text += f"{ae('money')} <b>Потрачено:</b> ${user['total_spent']:.2f}\n"
+    text += f"{ae('calendar')} <b>Регистрация:</b> {user['registered_at'][:10]}\n"
 
     if purchases:
         text += "\n<b>📋 Последние покупки:</b>\n"
@@ -421,7 +441,7 @@ async def text_profile(message: types.Message):
             text += f"• {p['product_name']} — ${p['price']}\n"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📜 Мои покупки", callback_data="my_purchases")]
+        [InlineKeyboardButton(text=f"{ae('archive')} Мои покупки", callback_data="my_purchases")]
     ])
 
     await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
@@ -430,13 +450,13 @@ async def text_profile(message: types.Message):
 @router.message(F.text == "🏬 О шопе")
 async def text_about(message: types.Message):
     info = await get_shop_setting("shop_info", "Информация о магазине не заполнена.")
-    text = f"🏬 <b>О шопе</b>\n\n<blockquote>{info}</blockquote>"
+    text = f"{ae('store')} <b>О шопе</b>\n\n<blockquote>{info}</blockquote>"
     await send_with_media(message.chat.id, text, "about_menu", None)
 
 
-@router.message(F.text == "🛟 Поддержка")
+@router.message(F.text == "❓ Поддержка")
 async def text_support(message: types.Message):
-    text = f"🛟 <b>Поддержка</b>\n\n<blockquote>По всем вопросам обращайтесь: {SUPPORT_USERNAME}</blockquote>"
+    text = f"{ae('support')} <b>Поддержка</b>\n\n<blockquote>По всем вопросам обращайтесь: {SUPPORT_USERNAME}</blockquote>"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✉️ Написать", url=f"https://t.me/{SUPPORT_USERNAME.replace('@', '')}")]
@@ -458,7 +478,7 @@ async def cb_shop(callback: types.CallbackQuery):
         keyboard.append([InlineKeyboardButton(text=f"📂 {cat['name']}", callback_data=f"cat_{cat['id']}")])
     keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="main")])
 
-    text = "🛒 <b>Каталог товаров</b>\n\n<blockquote>👇 Выберите категорию:</blockquote>"
+    text = f"{ae('cart')} <b>Каталог товаров</b>\n\n<blockquote>{ae('down')} Выберите категорию:</blockquote>"
     await callback.message.edit_text(text, parse_mode="HTML",
                                      reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
     await callback.answer()
@@ -482,7 +502,7 @@ async def cb_category(callback: types.CallbackQuery):
     keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="shop")])
 
     await callback.message.edit_text(
-        "<blockquote>👇 Выберите товар:</blockquote>",
+        "<blockquote>" + ae('down') + " Выберите товар:</blockquote>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
     )
@@ -500,7 +520,7 @@ async def cb_product(callback: types.CallbackQuery):
 
     text = f"📦 <b>{product['name']}</b>\n\n"
     text += f"<blockquote>{product['description']}</blockquote>\n\n"
-    text += f"💵 <b>Цена:</b> ${product['price']}"
+    text += f"{ae('money')} <b>Цена:</b> ${product['price']}"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💳 Купить", callback_data=f"buy_{prod_id}")],
@@ -545,7 +565,7 @@ async def cb_buy(callback: types.CallbackQuery):
 
     text = f"💳 <b>Оплата товара</b>\n\n"
     text += f"📦 <b>Товар:</b> {product['name']}\n"
-    text += f"💵 <b>Сумма:</b> ${product['price']} USDT\n\n"
+    text += f"{ae('money')} <b>Сумма:</b> ${product['price']} USDT\n\n"
     text += "<blockquote>Нажмите кнопку «Оплатить» и после оплаты нажмите «Проверить оплату»</blockquote>"
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
@@ -586,7 +606,7 @@ async def cb_check_payment(callback: types.CallbackQuery):
                                            f"💰 <b>Новая покупка!</b>\n\n"
                                            f"👤 Покупатель: @{callback.from_user.username or 'Без юзернейма'}\n"
                                            f"📦 Товар: {product['name']}\n"
-                                           f"💵 Сумма: ${payment['amount']}",
+                                           f"{ae('money')} Сумма: ${payment['amount']}",
                                            parse_mode="HTML"
                                            )
                 except:
@@ -607,7 +627,7 @@ async def cb_my_purchases(callback: types.CallbackQuery):
         await callback.answer("У вас пока нет покупок", show_alert=True)
         return
 
-    text = "📜 <b>Мои покупки</b>\n\n"
+    text = f"{ae('archive')} <b>Мои покупки</b>\n\n"
     for p in purchases:
         text += f"📦 {p['product_name']} — ${p['price']} ({p['purchased_at'][:10]})\n"
 
@@ -638,8 +658,8 @@ async def cb_admin_stats(callback: types.CallbackQuery):
 
     text = "📊 <b>Статистика</b>\n\n"
     text += f"👥 <b>Пользователей:</b> {users}\n"
-    text += f"🛒 <b>Покупок:</b> {purchases}\n"
-    text += f"💵 <b>Выручка:</b> ${revenue:.2f}\n"
+    text += f"{ae('cart')} <b>Покупок:</b> {purchases}\n"
+    text += f"{ae('money')} <b>Выручка:</b> ${revenue:.2f}\n"
     text += f"📦 <b>Товаров:</b> {products}"
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=admin_back())
@@ -654,9 +674,9 @@ async def cb_admin_media(callback: types.CallbackQuery):
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="setmedia_main_menu")],
-        [InlineKeyboardButton(text="🛒 Меню магазина", callback_data="setmedia_shop_menu")],
-        [InlineKeyboardButton(text="🏬 О шопе", callback_data="setmedia_about_menu")],
-        [InlineKeyboardButton(text="🛟 Поддержка", callback_data="setmedia_support_menu")],
+        [InlineKeyboardButton(text=f"{ae('cart')} Меню магазина", callback_data="setmedia_shop_menu")],
+        [InlineKeyboardButton(text=f"{ae('store')} О шопе", callback_data="setmedia_about_menu")],
+        [InlineKeyboardButton(text=f"{ae('support')} Поддержка", callback_data="setmedia_support_menu")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")]
     ])
 
@@ -804,7 +824,7 @@ async def cb_admin_categories(callback: types.CallbackQuery):
     keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")])
 
     await callback.message.edit_text(
-        "📁 <b>Категории</b>\n\n<blockquote>Управление категориями товаров:</blockquote>",
+        f"{ae('folder')} <b>Категории</b>\n\n<blockquote>Управление категориями товаров:</blockquote>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
     )
@@ -819,7 +839,7 @@ async def cb_addcat(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.add_category_name)
 
     await callback.message.edit_text(
-        "📁 <b>Новая категория</b>\n\n<blockquote>Введите название категории:</blockquote>",
+        f"{ae('folder')} <b>Новая категория</b>\n\n<blockquote>Введите название категории:</blockquote>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_categories")]
@@ -943,7 +963,8 @@ async def cb_newprodcat(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.add_product_name)
 
     await callback.message.edit_text(
-        "📦 <b>Новый товар</b>\n\n<blockquote>Введите название товара:</blockquote>",
+        "📦 <b>Новый товар</b>\n\n<blockquote>Введите название товара.\n\n"
+        "💡 Вы можете использовать анимированные эмодзи — просто скопируйте их из любого чата Telegram и вставьте в название или описание.</blockquote>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Назад", callback_data="addprod")]
@@ -954,11 +975,14 @@ async def cb_newprodcat(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(AdminStates.add_product_name)
 async def process_product_name(message: types.Message, state: FSMContext):
-    await state.update_data(name=message.text)
+    # Preserve text with entities (animated emoji) if present
+    name = message.html_text if message.entities else message.text
+    await state.update_data(name=name)
     await state.set_state(AdminStates.add_product_desc)
 
     await message.answer(
-        "📦 <b>Новый товар</b>\n\n<blockquote>Введите описание товара:</blockquote>",
+        "📦 <b>Новый товар</b>\n\n<blockquote>Введите описание товара.\n\n"
+        "💡 Вы можете использовать анимированные эмодзи прямо в тексте описания.</blockquote>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Назад", callback_data="addprod")]
@@ -968,7 +992,8 @@ async def process_product_name(message: types.Message, state: FSMContext):
 
 @router.message(AdminStates.add_product_desc)
 async def process_product_desc(message: types.Message, state: FSMContext):
-    await state.update_data(description=message.text)
+    description = message.html_text if message.entities else message.text
+    await state.update_data(description=description)
     await state.set_state(AdminStates.add_product_price)
 
     await message.answer(
