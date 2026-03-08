@@ -46,7 +46,67 @@ USD_KZT_RATE: float = 494.0
 # Процент кэшбэка на бонусный баланс
 CASHBACK_PERCENT: float = 5.0
 
-DB_PATH = "shop.db"
+DB_PATH = os.getenv("DB_PATH", "shop.db")
+
+# ══════════════════════════════════════════════
+#  Резервное копирование БД в GitHub
+#  Добавьте в .env файл:
+#    GITHUB_TOKEN   = ghp_xxxxxxx  (repo scope)
+#    GITHUB_REPO    = username/myshopbot
+#    GITHUB_DB_PATH = data/shop.db
+# ══════════════════════════════════════════════
+GITHUB_TOKEN   = os.getenv("GITHUB_TOKEN", "")
+GITHUB_REPO    = os.getenv("GITHUB_REPO", "")
+GITHUB_DB_PATH = os.getenv("GITHUB_DB_PATH", "shop.db")
+
+async def github_restore_db():
+    """Скачать shop.db из GitHub при старте бота."""
+    if not (GITHUB_TOKEN and GITHUB_REPO):
+        return
+    import base64 as _b64
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_DB_PATH}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(url, headers=headers) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    content = _b64.b64decode(data["content"])
+                    with open(DB_PATH, "wb") as f:
+                        f.write(content)
+                    logging.info("✅ БД восстановлена из GitHub")
+                else:
+                    logging.info("ℹ️ БД в GitHub не найдена — будет создана новая")
+    except Exception as e:
+        logging.warning(f"⚠️ Не удалось восстановить БД из GitHub: {e}")
+
+async def github_backup_db():
+    """Сохранить shop.db в GitHub после важных изменений."""
+    if not (GITHUB_TOKEN and GITHUB_REPO):
+        return
+    if not os.path.exists(DB_PATH):
+        return
+    import base64 as _b64
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_DB_PATH}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    try:
+        with open(DB_PATH, "rb") as f:
+            content_b64 = _b64.b64encode(f.read()).decode()
+        sha = None
+        async with aiohttp.ClientSession() as s:
+            async with s.get(url, headers=headers) as r:
+                if r.status == 200:
+                    sha = (await r.json()).get("sha")
+            payload = {"message": "backup: shop.db auto-save", "content": content_b64}
+            if sha:
+                payload["sha"] = sha
+            async with s.put(url, headers=headers, json=payload) as r:
+                if r.status in (200, 201):
+                    logging.info("✅ БД сохранена в GitHub")
+                else:
+                    logging.warning(f"⚠️ Ошибка сохранения БД: {r.status}")
+    except Exception as e:
+        logging.warning(f"⚠️ Не удалось сохранить БД в GitHub: {e}")
 
 bot     = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
@@ -247,13 +307,15 @@ async def db_one(sql, params=()):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(sql, params) as c:
-            return await c.fetchone()
+            row = await c.fetchone()
+            return dict(row) if row is not None else None
 
 async def db_all(sql, params=()):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(sql, params) as c:
-            return await c.fetchall()
+            rows = await c.fetchall()
+            return [dict(r) for r in rows]
 
 async def db_run(sql, params=()):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -1716,6 +1778,7 @@ async def cb_setordst(cb: types.CallbackQuery):
     await set_order_status(oid, status)
     product = await get_product(order['product_id'])
 
+    await github_backup_db()
     try:
         if status == "delivered":
             await bot.send_message(
@@ -2368,6 +2431,7 @@ async def cb_addcat(cb: types.CallbackQuery, state: FSMContext):
 async def proc_cat_name(msg: types.Message, state: FSMContext):
     await add_category(msg.text)
     await state.clear()
+    await github_backup_db()
     await msg.answer("✅ Категория добавлена!", reply_markup=kb_admin_back())
 
 @router.callback_query(F.data.startswith("dcat_"))
@@ -2807,6 +2871,7 @@ async def _finish_add_product(msg: types.Message, state: FSMContext,
         card_media_type=d.get('card_mt', ''),
         gallery=gallery
     )
+    await github_backup_db()
     await state.clear()
     sizes_str = ', '.join(d.get('sizes', [])) or '—'
     result = (
@@ -2888,6 +2953,7 @@ async def nav_clear_state(cb: types.CallbackQuery, state: FSMContext):
 #  Main
 # ══════════════════════════════════════════════
 async def main():
+    await github_restore_db()
     await init_db()
     logging.basicConfig(level=logging.INFO)
     print("\033[35m" + "═" * 46)
