@@ -1,7 +1,7 @@
 """
 ╔══════════════════════════════════════════════════════╗
 ║   SHOPBOT — Магазин одежды / Шымкент, Казахстан     ║
-║   aiogram 3.x | Turso libSQL | CryptoPay | KZT       ║
+║   aiogram 3.x | aiosqlite     | CryptoPay | KZT       ║
 ╚══════════════════════════════════════════════════════╝
 """
 
@@ -181,113 +181,117 @@ class ReviewSt(StatesGroup):
     comment = State()
 
 # ══════════════════════════════════════════════
-#  Инициализация базы данных (Turso)
+#  Инициализация базы данных
 # ══════════════════════════════════════════════
 async def init_db():
-    """Создаёт все таблицы если их нет (Turso / libSQL)."""
-    stmts = [
-        {"q": """CREATE TABLE IF NOT EXISTS users (
-            user_id           INTEGER PRIMARY KEY,
-            username          TEXT    DEFAULT '',
-            first_name        TEXT    DEFAULT '',
-            phone             TEXT    DEFAULT '',
-            default_address   TEXT    DEFAULT '',
-            total_purchases   INTEGER DEFAULT 0,
-            total_spent       REAL    DEFAULT 0,
-            bonus_balance     REAL    DEFAULT 0,
-            registered_at     TEXT
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS categories (
-            id   INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS products (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            category_id     INTEGER,
-            name            TEXT    NOT NULL,
-            description     TEXT    DEFAULT '',
-            price           REAL    NOT NULL,
-            sizes           TEXT    DEFAULT '[]',
-            stock           INTEGER DEFAULT 0,
-            seller_username TEXT    DEFAULT '',
-            seller_phone    TEXT    DEFAULT '',
-            card_file_id    TEXT    DEFAULT '',
-            card_media_type TEXT    DEFAULT '',
-            gallery         TEXT    DEFAULT '[]',
-            is_active       INTEGER DEFAULT 1,
-            created_at      TEXT
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS orders (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id     INTEGER,
-            product_id  INTEGER,
-            size        TEXT    DEFAULT '',
-            price       REAL,
-            method      TEXT    DEFAULT 'crypto',
-            phone       TEXT    DEFAULT '',
-            address     TEXT    DEFAULT '',
-            status      TEXT    DEFAULT 'processing',
-            created_at  TEXT
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS purchases (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id      INTEGER,
-            product_id   INTEGER,
-            price        REAL,
-            method       TEXT    DEFAULT 'crypto',
-            purchased_at TEXT
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS media_settings (
-            key        TEXT PRIMARY KEY,
-            media_type TEXT,
-            file_id    TEXT
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS shop_settings (
-            key   TEXT PRIMARY KEY,
-            value TEXT
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS crypto_payments (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id    INTEGER,
-            product_id INTEGER,
-            size       TEXT    DEFAULT '',
-            invoice_id TEXT UNIQUE,
-            amount_kzt REAL,
-            amount_usd REAL,
-            status     TEXT DEFAULT 'pending',
-            created_at TEXT
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS kaspi_payments (
-            id             INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id        INTEGER,
-            product_id     INTEGER,
-            size           TEXT    DEFAULT '',
-            amount         REAL,
-            status         TEXT    DEFAULT 'pending',
-            manager_msg_id INTEGER DEFAULT 0,
-            created_at     TEXT
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS reviews (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id    INTEGER,
-            product_id INTEGER,
-            order_id   INTEGER,
-            rating     INTEGER,
-            comment    TEXT,
-            created_at TEXT
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS ad_requests (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id     INTEGER,
-            description TEXT,
-            method      TEXT    DEFAULT 'crypto',
-            amount      REAL    DEFAULT 500,
-            status      TEXT    DEFAULT 'pending',
-            created_at  TEXT
-        )"""},
-    ]
-    await _turso(stmts)
-    logging.info("✅ БД Turso инициализирована")
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('PRAGMA journal_mode=WAL')
+        await db.execute('PRAGMA foreign_keys=ON')
+        await db.executescript("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id           INTEGER PRIMARY KEY,
+                username          TEXT    DEFAULT '',
+                first_name        TEXT    DEFAULT '',
+                phone             TEXT    DEFAULT '',
+                default_address   TEXT    DEFAULT '',
+                total_purchases   INTEGER DEFAULT 0,
+                total_spent       REAL    DEFAULT 0,
+                bonus_balance     REAL    DEFAULT 0,
+                registered_at     TEXT
+            );
+            CREATE TABLE IF NOT EXISTS categories (
+                id   INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS products (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                category_id     INTEGER,
+                name            TEXT    NOT NULL,
+                description     TEXT    DEFAULT '',
+                price           REAL    NOT NULL,
+                sizes           TEXT    DEFAULT '[]',
+                stock           INTEGER DEFAULT 0,
+                seller_username TEXT    DEFAULT '',
+                seller_phone    TEXT    DEFAULT '',
+                card_file_id    TEXT    DEFAULT '',
+                card_media_type TEXT    DEFAULT '',
+                gallery         TEXT    DEFAULT '[]',
+                is_active       INTEGER DEFAULT 1,
+                created_at      TEXT
+            );
+            CREATE TABLE IF NOT EXISTS orders (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER,
+                product_id  INTEGER,
+                size        TEXT    DEFAULT '',
+                price       REAL,
+                method      TEXT    DEFAULT 'crypto',
+                phone       TEXT    DEFAULT '',
+                address     TEXT    DEFAULT '',
+                status      TEXT    DEFAULT 'processing',
+                created_at  TEXT
+            );
+            CREATE TABLE IF NOT EXISTS purchases (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id      INTEGER,
+                product_id   INTEGER,
+                price        REAL,
+                method       TEXT    DEFAULT 'crypto',
+                purchased_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS media_settings (
+                key        TEXT PRIMARY KEY,
+                media_type TEXT,
+                file_id    TEXT
+            );
+            CREATE TABLE IF NOT EXISTS shop_settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            );
+            CREATE TABLE IF NOT EXISTS crypto_payments (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    INTEGER,
+                product_id INTEGER,
+                size       TEXT    DEFAULT '',
+                invoice_id TEXT UNIQUE,
+                amount_kzt REAL,
+                amount_usd REAL,
+                status     TEXT DEFAULT 'pending',
+                created_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS kaspi_payments (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id        INTEGER,
+                product_id     INTEGER,
+                size           TEXT    DEFAULT '',
+                amount         REAL,
+                status         TEXT    DEFAULT 'pending',
+                manager_msg_id INTEGER DEFAULT 0,
+                created_at     TEXT
+            );
+            CREATE TABLE IF NOT EXISTS reviews (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    INTEGER,
+                product_id INTEGER,
+                order_id   INTEGER,
+                rating     INTEGER,
+                comment    TEXT,
+                created_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS ad_requests (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER,
+                description TEXT,
+                method      TEXT    DEFAULT 'crypto',
+                amount      REAL    DEFAULT 500,
+                status      TEXT    DEFAULT 'pending',
+                created_at  TEXT
+            );
+        """)
+        await db.commit()
+    logging.info('✅ БД инициализирована')
+
+
 
 
 
