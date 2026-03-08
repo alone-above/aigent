@@ -1059,7 +1059,7 @@ async def cb_prod(cb: types.CallbackQuery):
         pass
 
     # Если есть карточка товара — отправляем с медиа
-    card_fid = p.get('card_file_id', '')
+    card_fid = p['card_file_id'] if p['card_file_id'] else ''
     card_mt  = p.get('card_media_type', '')
     markup   = InlineKeyboardMarkup(inline_keyboard=kb_rows)
     if card_fid and card_mt:
