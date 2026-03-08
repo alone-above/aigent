@@ -23,6 +23,8 @@ CRYPTOBOT_TOKEN = os.getenv("CRYPTOBOT_TOKEN")
 ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "").split(",")))
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "@support")
 SHOP_NAME = os.getenv("SHOP_NAME", "Digital Shop")
+KASPI_PHONE = os.getenv("KASPI_PHONE", "+7XXXXXXXXXX")   # Номер Kaspi для оплаты
+MANAGER_ID = int(os.getenv("MANAGER_ID", str(ADMIN_IDS[0]) if ADMIN_IDS else "0"))  # ID менеджера
 
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
@@ -30,8 +32,7 @@ dp = Dispatcher(storage=storage)
 router = Router()
 dp.include_router(router)
 
-# ==================== Animated Emoji ====================
-# Animated emoji helper: renders as animated sticker in Telegram
+# ==================== Animated Emoji (только для текста сообщений, НЕ для кнопок) ====================
 E = {
     "shop":     '<tg-emoji emoji-id="5373052667671093676">🛍</tg-emoji>',
     "question": '<tg-emoji emoji-id="5467666648263564704">❓</tg-emoji>',
@@ -40,14 +41,13 @@ E = {
     "money":    '<tg-emoji emoji-id="5472030678633684592">💸</tg-emoji>',
     "cart":     '<tg-emoji emoji-id="5431499171045581032">🛒</tg-emoji>',
     "calendar": '<tg-emoji emoji-id="5431897022456145283">📆</tg-emoji>',
-    "id":       '<b>ID</b>',
     "archive":  '<tg-emoji emoji-id="5431736674147114227">🗂</tg-emoji>',
     "store":    '<tg-emoji emoji-id="5265105755677159697">🏬</tg-emoji>',
     "support":  '<tg-emoji emoji-id="5467666648263564704">❓</tg-emoji>',
 }
 
 def ae(key: str) -> str:
-    """Return animated emoji HTML by key."""
+    """Return animated emoji HTML by key (use ONLY in message text, not in button labels)."""
     return E.get(key, "")
 
 DB_PATH = "shop.db"
@@ -128,6 +128,16 @@ async def init_db():
             invoice_id TEXT,
             amount REAL,
             status TEXT DEFAULT 'pending',
+            created_at TEXT
+        )''')
+        # Kaspi payments table
+        await db.execute('''CREATE TABLE IF NOT EXISTS kaspi_payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            product_id INTEGER,
+            amount REAL,
+            status TEXT DEFAULT 'pending',
+            manager_msg_id INTEGER,
             created_at TEXT
         )''')
         await db.commit()
@@ -275,6 +285,31 @@ async def get_payment(invoice_id: str):
             return await cursor.fetchone()
 
 
+async def save_kaspi_payment(user_id: int, product_id: int, amount: float, manager_msg_id: int = 0):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute('''INSERT INTO kaspi_payments (user_id, product_id, amount, manager_msg_id, created_at)
+            VALUES (?, ?, ?, ?, ?)''', (user_id, product_id, amount, manager_msg_id, datetime.now().isoformat()))
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_kaspi_payment(kaspi_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('SELECT * FROM kaspi_payments WHERE id = ?', (kaspi_id,)) as cursor:
+            return await cursor.fetchone()
+
+
+async def update_kaspi_payment(kaspi_id: int, status: str, manager_msg_id: int = None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        if manager_msg_id is not None:
+            await db.execute('UPDATE kaspi_payments SET status = ?, manager_msg_id = ? WHERE id = ?',
+                             (status, manager_msg_id, kaspi_id))
+        else:
+            await db.execute('UPDATE kaspi_payments SET status = ? WHERE id = ?', (status, kaspi_id))
+        await db.commit()
+
+
 async def get_all_users():
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute('SELECT user_id FROM users') as cursor:
@@ -376,6 +411,18 @@ async def set_commands(user_id: int):
     await bot.set_my_commands(commands, scope=BotCommandScopeChat(chat_id=user_id))
 
 
+async def deliver_product(user_id: int, product: aiosqlite.Row, reply_markup=None):
+    """Send product content to user after successful payment."""
+    text = f"✅ <b>Оплата подтверждена!</b>\n\n📦 <b>Товар:</b> {product['name']}\n\n"
+    if product['product_type'] == 'text':
+        text += f"<blockquote>{product['content']}</blockquote>"
+        await bot.send_message(user_id, text, parse_mode="HTML", reply_markup=reply_markup or back_button("shop"))
+    else:
+        await bot.send_message(user_id, text, parse_mode="HTML")
+        await bot.send_document(user_id, product['file_id'],
+                                caption="📎 Ваш товар", reply_markup=reply_markup or back_button("shop"))
+
+
 # ==================== Handlers ====================
 @router.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext):
@@ -430,7 +477,7 @@ async def text_profile(message: types.Message):
     purchases = await get_user_purchases(message.from_user.id)
 
     text = f"👤 <b>Мой профиль</b>\n\n"
-    text += f"{ae('id')} <b>ID:</b> <code>{message.from_user.id}</code>\n"
+    text += f"<b>ID:</b> <code>{message.from_user.id}</code>\n"
     text += f"{ae('cart')} <b>Покупок:</b> {user['total_purchases']}\n"
     text += f"{ae('money')} <b>Потрачено:</b> ${user['total_spent']:.2f}\n"
     text += f"{ae('calendar')} <b>Регистрация:</b> {user['registered_at'][:10]}\n"
@@ -441,7 +488,7 @@ async def text_profile(message: types.Message):
             text += f"• {p['product_name']} — ${p['price']}\n"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{ae('archive')} Мои покупки", callback_data="my_purchases")]
+        [InlineKeyboardButton(text="🗂 Мои покупки", callback_data="my_purchases")]
     ])
 
     await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
@@ -502,7 +549,7 @@ async def cb_category(callback: types.CallbackQuery):
     keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="shop")])
 
     await callback.message.edit_text(
-        "<blockquote>" + ae('down') + " Выберите товар:</blockquote>",
+        f"<blockquote>{ae('down')} Выберите товар:</blockquote>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
     )
@@ -535,6 +582,7 @@ async def cb_product(callback: types.CallbackQuery):
     await callback.answer()
 
 
+# ==================== Payment Method Selection ====================
 @router.callback_query(F.data.startswith("buy_"))
 async def cb_buy(callback: types.CallbackQuery):
     prod_id = int(callback.data.split("_")[1])
@@ -544,7 +592,33 @@ async def cb_buy(callback: types.CallbackQuery):
         await callback.answer("Товар не найден", show_alert=True)
         return
 
-    # Create CryptoBot invoice
+    text = (
+        f"💳 <b>Выберите способ оплаты</b>\n\n"
+        f"📦 <b>Товар:</b> {product['name']}\n"
+        f"{ae('money')} <b>Сумма:</b> ${product['price']}\n\n"
+        f"<blockquote>{ae('down')} Выберите удобный способ оплаты:</blockquote>"
+    )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔐 CryptoBot (USDT)", callback_data=f"pay_crypto_{prod_id}")],
+        [InlineKeyboardButton(text="🏦 Kaspi", callback_data=f"pay_kaspi_{prod_id}")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data=f"prod_{prod_id}")]
+    ])
+
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    await callback.answer()
+
+
+# ==================== CryptoBot Payment ====================
+@router.callback_query(F.data.startswith("pay_crypto_"))
+async def cb_pay_crypto(callback: types.CallbackQuery):
+    prod_id = int(callback.data.split("_")[2])
+    product = await get_product(prod_id)
+
+    if not product:
+        await callback.answer("Товар не найден", show_alert=True)
+        return
+
     invoice = await create_invoice(
         amount=product['price'],
         description=f"Покупка: {product['name']}",
@@ -558,15 +632,17 @@ async def cb_buy(callback: types.CallbackQuery):
     await save_payment(callback.from_user.id, prod_id, str(invoice['invoice_id']), product['price'])
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Оплатить", url=invoice['pay_url'])],
+        [InlineKeyboardButton(text="💳 Оплатить через CryptoBot", url=invoice['pay_url'])],
         [InlineKeyboardButton(text="✅ Проверить оплату", callback_data=f"check_{invoice['invoice_id']}")],
-        [InlineKeyboardButton(text="◀️ Отмена", callback_data=f"prod_{prod_id}")]
+        [InlineKeyboardButton(text="◀️ Назад", callback_data=f"buy_{prod_id}")]
     ])
 
-    text = f"💳 <b>Оплата товара</b>\n\n"
-    text += f"📦 <b>Товар:</b> {product['name']}\n"
-    text += f"{ae('money')} <b>Сумма:</b> ${product['price']} USDT\n\n"
-    text += "<blockquote>Нажмите кнопку «Оплатить» и после оплаты нажмите «Проверить оплату»</blockquote>"
+    text = (
+        f"🔐 <b>Оплата через CryptoBot</b>\n\n"
+        f"📦 <b>Товар:</b> {product['name']}\n"
+        f"{ae('money')} <b>Сумма:</b> ${product['price']} USDT\n\n"
+        f"<blockquote>Нажмите «Оплатить через CryptoBot», затем вернитесь и нажмите «Проверить оплату»</blockquote>"
+    )
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
     await callback.answer()
@@ -588,27 +664,25 @@ async def cb_check_payment(callback: types.CallbackQuery):
             product = await get_product(payment['product_id'])
             await add_purchase(callback.from_user.id, payment['product_id'], payment['amount'])
 
-            # Send product to user
-            text = f"✅ <b>Оплата успешна!</b>\n\n📦 <b>Товар:</b> {product['name']}\n\n"
-
-            if product['product_type'] == 'text':
-                text += f"<blockquote>{product['content']}</blockquote>"
-                await callback.message.edit_text(text, parse_mode="HTML", reply_markup=back_button("shop"))
-            else:
-                await callback.message.edit_text(text, parse_mode="HTML")
-                await bot.send_document(callback.from_user.id, product['file_id'],
-                                        caption="📎 Ваш товар", reply_markup=back_button("shop"))
+            await deliver_product(callback.from_user.id, product)
+            try:
+                await callback.message.delete()
+            except:
+                pass
 
             # Notify admins
             for admin_id in ADMIN_IDS:
                 try:
-                    await bot.send_message(admin_id,
-                                           f"💰 <b>Новая покупка!</b>\n\n"
-                                           f"👤 Покупатель: @{callback.from_user.username or 'Без юзернейма'}\n"
-                                           f"📦 Товар: {product['name']}\n"
-                                           f"{ae('money')} Сумма: ${payment['amount']}",
-                                           parse_mode="HTML"
-                                           )
+                    await bot.send_message(
+                        admin_id,
+                        f"💰 <b>Новая покупка (CryptoBot)!</b>\n\n"
+                        f"👤 Покупатель: @{callback.from_user.username or 'Без юзернейма'} "
+                        f"(<code>{callback.from_user.id}</code>)\n"
+                        f"📦 Товар: {product['name']}\n"
+                        f"{ae('money')} Сумма: ${payment['amount']} USDT\n"
+                        f"{ae('calendar')} Время: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+                        parse_mode="HTML"
+                    )
                 except:
                     pass
         else:
@@ -617,8 +691,193 @@ async def cb_check_payment(callback: types.CallbackQuery):
         await callback.answer("Оплата не найдена. Попробуйте позже.", show_alert=True)
 
 
-# ==================== Profile ====================
+# ==================== Kaspi Payment ====================
+@router.callback_query(F.data.startswith("pay_kaspi_"))
+async def cb_pay_kaspi(callback: types.CallbackQuery):
+    prod_id = int(callback.data.split("_")[2])
+    product = await get_product(prod_id)
 
+    if not product:
+        await callback.answer("Товар не найден", show_alert=True)
+        return
+
+    # Save pending kaspi payment
+    kaspi_id = await save_kaspi_payment(callback.from_user.id, prod_id, product['price'])
+
+    text = (
+        f"🏦 <b>Оплата через Kaspi</b>\n\n"
+        f"📦 <b>Товар:</b> {product['name']}\n"
+        f"{ae('money')} <b>Сумма:</b> ${product['price']}\n\n"
+        f"<blockquote>Переведите <b>${product['price']}</b> на номер Kaspi:\n\n"
+        f"📱 <code>{KASPI_PHONE}</code>\n\n"
+        f"После перевода нажмите «Я оплатил» — менеджер проверит и подтвердит вашу оплату.</blockquote>"
+    )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"kaspi_sent_{kaspi_id}")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data=f"buy_{prod_id}")]
+    ])
+
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("kaspi_sent_"))
+async def cb_kaspi_sent(callback: types.CallbackQuery):
+    kaspi_id = int(callback.data.split("_")[2])
+    payment = await get_kaspi_payment(kaspi_id)
+
+    if not payment:
+        await callback.answer("Платёж не найден", show_alert=True)
+        return
+
+    if payment['status'] != 'pending':
+        await callback.answer("Этот платёж уже обработан", show_alert=True)
+        return
+
+    product = await get_product(payment['product_id'])
+    user = await get_user(payment['user_id'])
+    username = callback.from_user.username or "Без юзернейма"
+
+    # Notify manager
+    manager_text = (
+        f"🏦 <b>Новая оплата через Kaspi!</b>\n\n"
+        f"👤 <b>Покупатель:</b> @{username} (<code>{payment['user_id']}</code>)\n"
+        f"📦 <b>Товар:</b> {product['name']}\n"
+        f"{ae('money')} <b>Сумма:</b> ${payment['amount']}\n"
+        f"{ae('calendar')} <b>Время:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
+        f"<blockquote>Проверьте поступление оплаты и подтвердите или отклоните:</blockquote>"
+    )
+
+    manager_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"kaspi_approve_{kaspi_id}"),
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"kaspi_reject_{kaspi_id}")
+        ]
+    ])
+
+    try:
+        mgr_msg = await bot.send_message(MANAGER_ID, manager_text, parse_mode="HTML",
+                                         reply_markup=manager_keyboard)
+        await update_kaspi_payment(kaspi_id, 'waiting', mgr_msg.message_id)
+    except Exception as e:
+        await callback.answer("Ошибка отправки уведомления менеджеру. Обратитесь в поддержку.", show_alert=True)
+        return
+
+    # Notify user
+    await callback.message.edit_text(
+        f"⏳ <b>Ожидаем подтверждения</b>\n\n"
+        f"Ваш платёж отправлен на проверку менеджеру.\n"
+        f"Как только оплата будет подтверждена — товар будет выдан автоматически.\n\n"
+        f"<blockquote>Обычно проверка занимает несколько минут.</blockquote>",
+        parse_mode="HTML",
+        reply_markup=back_button("shop")
+    )
+    await callback.answer("✅ Заявка отправлена менеджеру!")
+
+
+@router.callback_query(F.data.startswith("kaspi_approve_"))
+async def cb_kaspi_approve(callback: types.CallbackQuery):
+    if callback.from_user.id != MANAGER_ID and callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    kaspi_id = int(callback.data.split("_")[2])
+    payment = await get_kaspi_payment(kaspi_id)
+
+    if not payment:
+        await callback.answer("Платёж не найден", show_alert=True)
+        return
+
+    if payment['status'] == 'paid':
+        await callback.answer("Уже подтверждено!", show_alert=True)
+        return
+
+    if payment['status'] == 'rejected':
+        await callback.answer("Платёж уже отклонён!", show_alert=True)
+        return
+
+    product = await get_product(payment['product_id'])
+    await update_kaspi_payment(kaspi_id, 'paid')
+    await add_purchase(payment['user_id'], payment['product_id'], payment['amount'])
+
+    # Deliver product to user
+    await deliver_product(payment['user_id'], product)
+
+    # Update manager message
+    await callback.message.edit_text(
+        callback.message.text + f"\n\n✅ <b>ПОДТВЕРЖДЕНО</b> менеджером @{callback.from_user.username or callback.from_user.id}",
+        parse_mode="HTML"
+    )
+    await callback.answer("✅ Оплата подтверждена, товар выдан!")
+
+    # Notify all admins
+    for admin_id in ADMIN_IDS:
+        if admin_id == MANAGER_ID:
+            continue
+        try:
+            user = await get_user(payment['user_id'])
+            await bot.send_message(
+                admin_id,
+                f"💰 <b>Новая покупка (Kaspi)!</b>\n\n"
+                f"👤 Покупатель: <code>{payment['user_id']}</code>\n"
+                f"📦 Товар: {product['name']}\n"
+                f"{ae('money')} Сумма: ${payment['amount']}\n"
+                f"{ae('calendar')} Время: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
+                f"✅ Подтвердил: @{callback.from_user.username or callback.from_user.id}",
+                parse_mode="HTML"
+            )
+        except:
+            pass
+
+
+@router.callback_query(F.data.startswith("kaspi_reject_"))
+async def cb_kaspi_reject(callback: types.CallbackQuery):
+    if callback.from_user.id != MANAGER_ID and callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    kaspi_id = int(callback.data.split("_")[2])
+    payment = await get_kaspi_payment(kaspi_id)
+
+    if not payment:
+        await callback.answer("Платёж не найден", show_alert=True)
+        return
+
+    if payment['status'] in ('paid', 'rejected'):
+        await callback.answer("Платёж уже обработан!", show_alert=True)
+        return
+
+    await update_kaspi_payment(kaspi_id, 'rejected')
+
+    # Notify user
+    product = await get_product(payment['product_id'])
+    try:
+        await bot.send_message(
+            payment['user_id'],
+            f"❌ <b>Оплата отклонена</b>\n\n"
+            f"📦 Товар: {product['name']}\n"
+            f"{ae('money')} Сумма: ${payment['amount']}\n\n"
+            f"<blockquote>Менеджер не подтвердил оплату. "
+            f"Если вы уверены, что перевод был сделан — обратитесь в поддержку: {SUPPORT_USERNAME}</blockquote>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❓ Поддержка",
+                                      url=f"https://t.me/{SUPPORT_USERNAME.replace('@', '')}")]
+            ])
+        )
+    except:
+        pass
+
+    # Update manager message
+    await callback.message.edit_text(
+        callback.message.text + f"\n\n❌ <b>ОТКЛОНЕНО</b> менеджером @{callback.from_user.username or callback.from_user.id}",
+        parse_mode="HTML"
+    )
+    await callback.answer("❌ Оплата отклонена, пользователь уведомлён")
+
+
+# ==================== Profile ====================
 @router.callback_query(F.data == "my_purchases")
 async def cb_my_purchases(callback: types.CallbackQuery):
     purchases = await get_user_purchases(callback.from_user.id)
@@ -674,9 +933,9 @@ async def cb_admin_media(callback: types.CallbackQuery):
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="setmedia_main_menu")],
-        [InlineKeyboardButton(text=f"{ae('cart')} Меню магазина", callback_data="setmedia_shop_menu")],
-        [InlineKeyboardButton(text=f"{ae('store')} О шопе", callback_data="setmedia_about_menu")],
-        [InlineKeyboardButton(text=f"{ae('support')} Поддержка", callback_data="setmedia_support_menu")],
+        [InlineKeyboardButton(text="🛒 Меню магазина", callback_data="setmedia_shop_menu")],
+        [InlineKeyboardButton(text="🏬 О шопе", callback_data="setmedia_about_menu")],
+        [InlineKeyboardButton(text="❓ Поддержка", callback_data="setmedia_support_menu")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")]
     ])
 
@@ -757,14 +1016,12 @@ async def cb_admin_broadcast(callback: types.CallbackQuery, state: FSMContext):
 
     await state.set_state(AdminStates.broadcast_text)
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")]
-    ])
-
     await callback.message.edit_text(
         "📨 <b>Рассылка</b>\n\n<blockquote>Отправьте текст, фото, видео или GIF для рассылки:</blockquote>",
         parse_mode="HTML",
-        reply_markup=keyboard
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")]
+        ])
     )
     await callback.answer()
 
@@ -918,11 +1175,9 @@ async def cb_delprod(callback: types.CallbackQuery):
         return
 
     prod_id = int(callback.data.split("_")[1])
-    product = await get_product(prod_id)
     await delete_product(prod_id)
     await callback.answer("✅ Товар удален", show_alert=True)
 
-    # Return to category view
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_products")]
     ])
@@ -964,7 +1219,7 @@ async def cb_newprodcat(callback: types.CallbackQuery, state: FSMContext):
 
     await callback.message.edit_text(
         "📦 <b>Новый товар</b>\n\n<blockquote>Введите название товара.\n\n"
-        "💡 Вы можете использовать анимированные эмодзи — просто скопируйте их из любого чата Telegram и вставьте в название или описание.</blockquote>",
+        "💡 Вы можете использовать анимированные эмодзи — скопируйте их из любого чата Telegram.</blockquote>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Назад", callback_data="addprod")]
@@ -975,14 +1230,14 @@ async def cb_newprodcat(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(AdminStates.add_product_name)
 async def process_product_name(message: types.Message, state: FSMContext):
-    # Preserve text with entities (animated emoji) if present
+    # Preserve entities (animated emoji) if present
     name = message.html_text if message.entities else message.text
     await state.update_data(name=name)
     await state.set_state(AdminStates.add_product_desc)
 
     await message.answer(
         "📦 <b>Новый товар</b>\n\n<blockquote>Введите описание товара.\n\n"
-        "💡 Вы можете использовать анимированные эмодзи прямо в тексте описания.</blockquote>",
+        "💡 Анимированные эмодзи тоже поддерживаются.</blockquote>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Назад", callback_data="addprod")]
