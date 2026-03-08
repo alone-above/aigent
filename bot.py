@@ -65,10 +65,10 @@ AE = {
     "archive": '<tg-emoji emoji-id="5431736674147114227">🗂</tg-emoji>',
     "store":   '<tg-emoji emoji-id="5265105755677159697">🏬</tg-emoji>',
     "support": '<tg-emoji emoji-id="5467666648263564704">❓</tg-emoji>',
-    "star":    '<tg-emoji emoji-id="5368324170671202286">⭐</tg-emoji>',
-    "gift":    '<tg-emoji emoji-id="5431456208487708461">🎁</tg-emoji>',
-    "truck":   '<tg-emoji emoji-id="5431736674147114227">🚚</tg-emoji>',
-    "tag":     '<tg-emoji emoji-id="5467666648263564704">🏷</tg-emoji>',
+    "star":    "⭐",
+    "gift":    "🎁",
+    "truck":   "🚚",
+    "tag":     "🏷",
 }
 def ae(k): return AE.get(k, "")
 
