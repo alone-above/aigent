@@ -67,14 +67,16 @@ async def get_http_session() -> aiohttp.ClientSession:
     return _http_session
 
 def _to_turso_arg(v):
+    """Конвертация Python значений в hrana v2 формат.
+    ВАЖНО: integer и float — value должна быть СТРОКОЙ по протоколу hrana v2."""
     if v is None:
         return {"type": "null"}
     if isinstance(v, bool):
-        return {"type": "integer", "value": 1 if v else 0}
+        return {"type": "integer", "value": "1" if v else "0"}
     if isinstance(v, int):
-        return {"type": "integer", "value": v}
+        return {"type": "integer", "value": str(v)}
     if isinstance(v, float):
-        return {"type": "float", "value": v}
+        return {"type": "float", "value": str(v)}
     return {"type": "text", "value": str(v)}
 
 def _coerce_row(row: dict) -> dict:
@@ -106,10 +108,13 @@ async def _turso(statements: list) -> list:
     statements = [{"q": "SELECT ...", "params": [val, ...]}, ...]
     Возвращает список результатов: [{"rows": [...], "last_insert_rowid": N}, ...]
     """
+    # Debug: раскомментируй для диагностики
+    # for s in statements:
+    #     logging.info(f"SQL: {s['q'][:60]} | params: {s.get('params')}")
     reqs = []
     for s in statements:
         stmt = {"sql": s["q"]}
-        if s.get("params"):
+        if s.get("params") is not None and len(s["params"]) > 0:
             stmt["args"] = [_to_turso_arg(v) for v in s["params"]]
         reqs.append({"type": "execute", "stmt": stmt})
     reqs.append({"type": "close"})
@@ -128,15 +133,20 @@ async def _turso(statements: list) -> list:
             rows = []
             for row in rs.get("rows", []):
                 rows.append(_coerce_row(dict(zip(cols, [cell.get("value") for cell in row]))))
+            rid = rs.get("last_insert_rowid")
             results.append({
                 "rows": rows,
-                "last_insert_rowid": rs.get("last_insert_rowid"),
+                "last_insert_rowid": rid,
             })
         elif t == "close":
             pass
-        else:
+        elif t == "error":
             err = item.get("error", {})
-            raise RuntimeError(f"Turso error: {err.get('message', item)}")
+            msg = err.get("message", str(item))
+            logging.error(f"Turso SQL error: {msg}")
+            raise RuntimeError(f"Turso error: {msg}")
+        else:
+            logging.warning(f"Turso unexpected result type: {t!r} | item={item}")
     return results
 
 async def db_one(sql, params=()):
@@ -152,15 +162,26 @@ async def db_all(sql, params=()):
 
 async def db_run(sql, params=()):
     """Выполнить INSERT/UPDATE/DELETE без возврата данных."""
-    await _turso([{"q": sql, "params": list(params)}])
+    try:
+        await _turso([{"q": sql, "params": list(params)}])
+    except Exception as e:
+        logging.error(f"db_run ERROR: {e} | SQL: {sql[:80]} | params: {params}")
+        raise
 
 async def db_insert(sql, params=()):
     """Выполнить INSERT и вернуть last_insert_rowid."""
-    res = await _turso([{"q": sql, "params": list(params)}])
+    try:
+        res = await _turso([{"q": sql, "params": list(params)}])
+    except Exception as e:
+        logging.error(f"db_insert ERROR: {e} | SQL: {sql[:80]}")
+        raise
     rid = res[0]["last_insert_rowid"] if res else None
     try:
-        return int(rid) if rid is not None else None
+        result = int(rid) if rid is not None else None
+        logging.debug(f"db_insert OK: last_insert_rowid={result}")
+        return result
     except (ValueError, TypeError):
+        logging.error(f"db_insert: cannot parse rowid={rid!r}")
         return None
 # ══════════════════════════════════════════════
 #  In-memory кэш с TTL (8 секунд)
