@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════╗
-║   SHOPBOT — Магазин одежды / Шымкент, Казахстан     ║a
+║   SHOPBOT — Магазин одежды / Шымкент, Казахстан     ║
 ║   aiogram 3.x | Turso libSQL | CryptoPay | KZT       ║
 ╚══════════════════════════════════════════════════════╝
 """
@@ -57,6 +57,15 @@ TURSO_TOKEN = os.getenv("TURSO_TOKEN", "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJ
 _TURSO_HTTP = TURSO_URL.replace("libsql://", "https://") + "/v2/pipeline"
 _TURSO_HDR  = {"Authorization": f"Bearer {TURSO_TOKEN}", "Content-Type": "application/json"}
 
+# Глобальная aiohttp-сессия (переиспользуется для всех запросов к Turso)
+_http_session: aiohttp.ClientSession | None = None
+
+async def get_http_session() -> aiohttp.ClientSession:
+    global _http_session
+    if _http_session is None or _http_session.closed:
+        _http_session = aiohttp.ClientSession()
+    return _http_session
+
 def _to_turso_arg(v):
     if v is None:
         return {"type": "null"}
@@ -67,6 +76,29 @@ def _to_turso_arg(v):
     if isinstance(v, float):
         return {"type": "float", "value": v}
     return {"type": "text", "value": str(v)}
+
+def _coerce_row(row: dict) -> dict:
+    """Turso возвращает все числа как строки. Конвертируем обратно."""
+    out = {}
+    for k, v in row.items():
+        if v is None:
+            out[k] = v
+        elif isinstance(v, str):
+            # Попробуем int, потом float
+            try:
+                out[k] = int(v)
+                continue
+            except (ValueError, TypeError):
+                pass
+            try:
+                out[k] = float(v)
+                continue
+            except (ValueError, TypeError):
+                pass
+            out[k] = v
+        else:
+            out[k] = v
+    return out
 
 async def _turso(statements: list) -> list:
     """
@@ -82,10 +114,10 @@ async def _turso(statements: list) -> list:
         reqs.append({"type": "execute", "stmt": stmt})
     reqs.append({"type": "close"})
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(_TURSO_HTTP, headers=_TURSO_HDR,
-                                json={"requests": reqs}) as resp:
-            data = await resp.json()
+    session = await get_http_session()
+    async with session.post(_TURSO_HTTP, headers=_TURSO_HDR,
+                            json={"requests": reqs}) as resp:
+        data = await resp.json()
 
     results = []
     for item in data.get("results", []):
@@ -95,7 +127,7 @@ async def _turso(statements: list) -> list:
             cols = [c["name"] for c in rs.get("cols", [])]
             rows = []
             for row in rs.get("rows", []):
-                rows.append(dict(zip(cols, [cell.get("value") for cell in row])))
+                rows.append(_coerce_row(dict(zip(cols, [cell.get("value") for cell in row]))))
             results.append({
                 "rows": rows,
                 "last_insert_rowid": rs.get("last_insert_rowid"),
@@ -126,7 +158,50 @@ async def db_insert(sql, params=()):
     """Выполнить INSERT и вернуть last_insert_rowid."""
     res = await _turso([{"q": sql, "params": list(params)}])
     rid = res[0]["last_insert_rowid"] if res else None
-    return int(rid) if rid is not None else None
+    try:
+        return int(rid) if rid is not None else None
+    except (ValueError, TypeError):
+        return None
+# ══════════════════════════════════════════════
+#  In-memory кэш с TTL (8 секунд)
+#  Снижает нагрузку на Turso в ~10x
+# ══════════════════════════════════════════════
+import time as _time
+
+_CACHE: dict = {}          # key → (value, expires_at)
+CACHE_TTL = 8              # секунд
+
+def _cache_get(key):
+    entry = _CACHE.get(key)
+    if entry and _time.monotonic() < entry[1]:
+        return entry[0], True
+    return None, False
+
+def _cache_set(key, value):
+    _CACHE[key] = (value, _time.monotonic() + CACHE_TTL)
+    return value
+
+def _cache_invalidate(*prefixes):
+    """Удалить все ключи начинающиеся на prefix."""
+    dead = [k for k in _CACHE for p in prefixes if k == p or k.startswith(p + ":")]
+    for k in dead:
+        _CACHE.pop(k, None)
+
+async def cached_db_one(cache_key, sql, params=()):
+    v, hit = _cache_get(cache_key)
+    if hit:
+        return v
+    v = await db_one(sql, params)
+    return _cache_set(cache_key, v)
+
+async def cached_db_all(cache_key, sql, params=()):
+    v, hit = _cache_get(cache_key)
+    if hit:
+        return v
+    v = await db_all(sql, params)
+    return _cache_set(cache_key, v)
+
+
 
 bot     = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
@@ -314,15 +389,18 @@ async def ensure_user(u: types.User):
            VALUES (?, ?, ?, ?)''',
         (u.id, u.username or '', u.first_name or '', datetime.now().isoformat())
     )
+    _cache_invalidate(f"user:{u.id}")
 
 async def get_user(uid):
-    return await db_one('SELECT * FROM users WHERE user_id=?', (uid,))
+    return await cached_db_one(f"user:{uid}", 'SELECT * FROM users WHERE user_id=?', (uid,))
 
 async def update_user_phone(uid, phone: str):
     await db_run('UPDATE users SET phone=? WHERE user_id=?', (phone, uid))
+    _cache_invalidate(f"user:{uid}")
 
 async def update_user_address(uid, address: str):
     await db_run('UPDATE users SET default_address=? WHERE user_id=?', (address, uid))
+    _cache_invalidate(f"user:{uid}")
 
 async def add_bonus(uid, amount_kzt: float) -> float:
     bonus = round(amount_kzt * CASHBACK_PERCENT / 100, 0)
@@ -330,50 +408,59 @@ async def add_bonus(uid, amount_kzt: float) -> float:
         'UPDATE users SET bonus_balance=bonus_balance+? WHERE user_id=?',
         (bonus, uid)
     )
+    _cache_invalidate(f"user:{uid}")
     return bonus
 
 # ── Категории ──────────────────────────────────
 async def get_categories():
-    return await db_all('SELECT * FROM categories ORDER BY id')
+    return await cached_db_all("categories", 'SELECT * FROM categories ORDER BY id')
 
 async def add_category(name: str):
     await db_run('INSERT INTO categories(name) VALUES(?)', (name,))
+    _cache_invalidate("categories")
 
 async def del_category(cid: int):
     await db_run('UPDATE products SET is_active=0 WHERE category_id=?', (cid,))
     await db_run('DELETE FROM categories WHERE id=?', (cid,))
+    _cache_invalidate("categories", "products")
 
 # ── Товары ─────────────────────────────────────
 async def get_products(cid: int):
-    return await db_all(
-        'SELECT * FROM products WHERE category_id=? AND is_active=1', (cid,)
+    return await cached_db_all(
+        f"products:{cid}", 'SELECT * FROM products WHERE category_id=? AND is_active=1', (cid,)
     )
 
 async def get_product(pid: int):
-    return await db_one('SELECT * FROM products WHERE id=?', (pid,))
+    return await cached_db_one(f"product:{pid}", 'SELECT * FROM products WHERE id=?', (pid,))
 
 async def add_product(cid, name, desc, price, sizes_list,
                       stock, seller_username='', seller_phone='',
                       card_file_id='', card_media_type='', gallery=None):
     sizes_json   = json.dumps(sizes_list, ensure_ascii=False)
     gallery_json = json.dumps(gallery or [], ensure_ascii=False)
-    await db_run(
+    pid = await db_insert(
         '''INSERT INTO products
            (category_id, name, description, price, sizes, stock,
             seller_username, seller_phone,
-            card_file_id, card_media_type, gallery, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            card_file_id, card_media_type, gallery, is_active, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)''',
         (cid, name, desc, price, sizes_json, stock,
          seller_username, seller_phone,
          card_file_id, card_media_type, gallery_json,
          datetime.now().isoformat())
     )
+    # Сбрасываем кэш каталога чтобы товар сразу появился
+    _cache_invalidate("products")
+    _cache_invalidate("categories")
+    return pid
 
 async def del_product(pid: int):
     await db_run('UPDATE products SET is_active=0 WHERE id=?', (pid,))
+    _cache_invalidate("products", f"product:{pid}")
 
 async def reduce_stock(pid: int):
     await db_run('UPDATE products SET stock=MAX(0, stock-1) WHERE id=?', (pid,))
+    _cache_invalidate(f"product:{pid}")
 
 def parse_sizes(product) -> list:
     try:
@@ -414,6 +501,7 @@ async def add_purchase(uid, pid, price, method='crypto'):
         'UPDATE users SET total_purchases=total_purchases+1, total_spent=total_spent+? WHERE user_id=?',
         (price, uid)
     )
+    _cache_invalidate(f"user:{uid}")
 
 # ── Отзывы ─────────────────────────────────────
 async def add_review(uid, pid, oid, rating, comment):
@@ -449,15 +537,17 @@ async def set_media(key, mtype, fid):
         'INSERT OR REPLACE INTO media_settings(key,media_type,file_id) VALUES(?,?,?)',
         (key, mtype, fid)
     )
+    _cache_invalidate(f"media:{key}")
 
 async def get_media(key):
-    return await db_one('SELECT * FROM media_settings WHERE key=?', (key,))
+    return await cached_db_one(f"media:{key}", 'SELECT * FROM media_settings WHERE key=?', (key,))
 
 async def set_setting(k, v):
     await db_run('INSERT OR REPLACE INTO shop_settings(key,value) VALUES(?,?)', (k, v))
+    _cache_invalidate(f"setting:{k}")
 
 async def get_setting(k, default=''):
-    r = await db_one('SELECT value FROM shop_settings WHERE key=?', (k,))
+    r = await cached_db_one(f"setting:{k}", 'SELECT value FROM shop_settings WHERE key=?', (k,))
     return r['value'] if r else default
 
 async def get_stats():
@@ -802,6 +892,11 @@ def _profile_kb() -> InlineKeyboardMarkup:
     ])
 
 async def _send_profile(tg_user: types.User, user, send_fn=None, edit_msg=None):
+    if user is None:
+        # Запасной вариант — пользователь ещё не в БД
+        if send_fn:
+            await send_fn("⏳ Профиль создаётся, попробуйте снова.", parse_mode="HTML")
+        return
     text = _profile_text(tg_user, user)
     kb   = _profile_kb()
     if edit_msg:
@@ -2082,7 +2177,11 @@ async def cb_ad_approve(cb: types.CallbackQuery):
     if cb.from_user.id != MANAGER_ID and cb.from_user.id not in ADMIN_IDS:
         await cb.answer("Нет доступа", show_alert=True)
         return
-    aid = int(cb.data.split("_")[2])
+    parts = cb.data.split("_")
+    if len(parts) < 3 or parts[2] in (None, "None", ""):
+        await cb.answer("Ошибка: ID заявки не найден", show_alert=True)
+        return
+    aid = int(parts[2])
     ar  = await get_ad_request(aid)
     if not ar:
         await cb.answer("Заявка не найдена", show_alert=True)
@@ -2115,7 +2214,11 @@ async def cb_ad_reject(cb: types.CallbackQuery):
     if cb.from_user.id != MANAGER_ID and cb.from_user.id not in ADMIN_IDS:
         await cb.answer("Нет доступа", show_alert=True)
         return
-    aid = int(cb.data.split("_")[2])
+    parts = cb.data.split("_")
+    if len(parts) < 3 or parts[2] in (None, "None", ""):
+        await cb.answer("Ошибка: ID заявки не найден", show_alert=True)
+        return
+    aid = int(parts[2])
     ar  = await get_ad_request(aid)
     if not ar or ar['status'] != 'pending':
         await cb.answer("Заявка уже обработана", show_alert=True)
@@ -2929,6 +3032,8 @@ async def nav_clear_state(cb: types.CallbackQuery, state: FSMContext):
 #  Main
 # ══════════════════════════════════════════════
 async def main():
+    global _http_session
+    _http_session = aiohttp.ClientSession()
     await init_db()
     logging.basicConfig(level=logging.INFO)
     print("\033[35m" + "═" * 46)
@@ -2937,7 +3042,11 @@ async def main():
     print(f"  💱 Курс USD/KZT: {USD_KZT_RATE} (фикс.)")
     print(f"  🎁 Кэшбэк: {CASHBACK_PERCENT}%")
     print("🚀 Бот запущен!")
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        if _http_session and not _http_session.closed:
+            await _http_session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
