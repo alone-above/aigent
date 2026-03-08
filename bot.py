@@ -1059,8 +1059,9 @@ async def cb_prod(cb: types.CallbackQuery):
         pass
 
     # Если есть карточка товара — отправляем с медиа
-    card_fid = p['card_file_id'] if p['card_file_id'] else ''
-    card_mt  = p.get('card_media_type', '')
+    # Вместо p.get(...) используйте проверку ключа напрямую:
+    card_fid = p['card_file_id'] if p['card_file_id'] is not None else ''
+    card_mt  = p['card_media_type'] if p['card_media_type'] is not None else '''')
     markup   = InlineKeyboardMarkup(inline_keyboard=kb_rows)
     if card_fid and card_mt:
         try:
