@@ -56,6 +56,7 @@ dp.include_router(router)
 #  Анимированные эмодзи (только в тексте сообщений, НЕ в кнопках!)
 # ══════════════════════════════════════════════
 AE = {
+    # Системные / навигация
     "shop":    '<tg-emoji emoji-id="5373052667671093676">🛍</tg-emoji>',
     "down":    '<tg-emoji emoji-id="5470177992950946662">👇</tg-emoji>',
     "folder":  '<tg-emoji emoji-id="5433653135799228968">📁</tg-emoji>',
@@ -65,10 +66,16 @@ AE = {
     "archive": '<tg-emoji emoji-id="5431736674147114227">🗂</tg-emoji>',
     "store":   '<tg-emoji emoji-id="5265105755677159697">🏬</tg-emoji>',
     "support": '<tg-emoji emoji-id="5467666648263564704">❓</tg-emoji>',
-    "star":    "⭐",
-    "gift":    "🎁",
-    "truck":   "🚚",
-    "tag":     "🏷",
+    "star":    '<tg-emoji emoji-id="5368324170671202286">⭐</tg-emoji>',
+    "truck":   '<tg-emoji emoji-id="5431736674147114227">🚚</tg-emoji>',
+    # Обновлённые пользовательские эмодзи
+    "box":     '<tg-emoji emoji-id="5298487770510020895">💤</tg-emoji>',   # 📦 товар
+    "size":    '<tg-emoji emoji-id="5400250414929041085">⚖️</tg-emoji>',   # 📐 размер
+    "phone":   '<tg-emoji emoji-id="5467539229468793355">📞</tg-emoji>',   # 📞 телефон
+    "tag":     '<tg-emoji emoji-id="5890883384057533697">🏷</tg-emoji>',   # 🏷 название
+    "gift":    '<tg-emoji emoji-id="5199749070830197566">🎁</tg-emoji>',   # 🎁 бонус
+    "pin":     '<tg-emoji emoji-id="5983099415689171511">📍</tg-emoji>',   # 📍 адрес
+    "user":    '<tg-emoji emoji-id="5373012449597335010">👤</tg-emoji>',   # 👤 пользователь
 }
 def ae(k): return AE.get(k, "")
 
@@ -102,7 +109,16 @@ class ReviewSt(StatesGroup):
 #  База данных
 # ══════════════════════════════════════════════
 async def init_db():
+    """
+    Инициализация базы данных.
+    Бот сам создаёт все таблицы при первом запуске.
+    Достаточно создать пустой файл shop.db — остальное сделает этот метод.
+    """
     async with aiosqlite.connect(DB_PATH) as db:
+        # WAL-режим: надёжнее при параллельных записях
+        await db.execute("PRAGMA journal_mode=WAL")
+        # Внешние ключи
+        await db.execute("PRAGMA foreign_keys=ON")
         await db.executescript('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id           INTEGER PRIMARY KEY,
@@ -632,12 +648,12 @@ def _profile_text(tg_user: types.User, user) -> str:
     phone   = user['phone']           if user['phone']           else '— не указан'
     address = user['default_address'] if user['default_address'] else '— не указан'
     return (
-        f"👤 <b>Профиль</b>\n\n"
+        f"{ae('user')} <b>Профиль</b>\n\n"
         f"━━━━━━━━━━━━━━━━━\n"
         f"🆔 <b>ID:</b> <code>{tg_user.id}</code>\n"
-        f"👤 <b>Имя:</b> {tg_user.first_name or '—'}\n\n"
-        f"📞 <b>Телефон:</b> <code>{phone}</code>\n"
-        f"📍 <b>Адрес доставки:</b>\n"
+        f"{ae('user')} <b>Имя:</b> {tg_user.first_name or '—'}\n\n"
+        f"{ae('phone')} <b>Телефон:</b> <code>{phone}</code>\n"
+        f"{ae('pin')} <b>Адрес доставки:</b>\n"
         f"    <i>{address}</i>\n\n"
         f"{ae('cart')} <b>Заказов:</b> {user['total_purchases']}\n"
         f"{ae('money')} <b>Потрачено:</b> {fmt_price(user['total_spent'])}\n"
@@ -810,7 +826,7 @@ async def cb_my_orders(cb: types.CallbackQuery):
     text = f"{ae('archive')} <b>Мои заказы</b>\n\n━━━━━━━━━━━━━━━━━\n"
     for o in orders:
         text += (
-            f"📦 <b>{o['pname']}</b>  ({o['size']})\n"
+            f"{ae('box')} <b>{o['pname']}</b>  ({o['size']})\n"
             f"   {fmt_price(o['price'])}  —  {order_status_text(o['status'])}\n"
             f"   <i>{o['created_at'][:10]}</i>\n\n"
         )
@@ -905,7 +921,7 @@ async def cb_prod(cb: types.CallbackQuery):
     if p['seller_phone'] or p['seller_username']:
         seller_block = "━━━━━━━━━━━━━━━━━\n"
         if p['seller_phone']:
-            seller_block += f"📞 <b>Продавец:</b> <code>{p['seller_phone']}</code>\n"
+            seller_block += f"{ae('phone')} <b>Продавец:</b> <code>{p['seller_phone']}</code>\n"
         if p['seller_username']:
             un = p['seller_username'].lstrip('@')
             seller_block += f"💬 <b>Telegram:</b> @{un}\n"
@@ -917,8 +933,8 @@ async def cb_prod(cb: types.CallbackQuery):
         f"<blockquote>{p['description']}</blockquote>\n\n"
         f"━━━━━━━━━━━━━━━━━\n"
         f"{ae('money')} <b>Цена:</b>  <code>{fmt_price(p['price'])}</code>\n"
-        f"📐 <b>Размеры:</b>  {sizes_s}\n"
-        f"📦 <b>Статус:</b>  {stock_s}\n"
+        f"{ae('size')} <b>Размеры:</b>  {sizes_s}\n"
+        f"{ae('box')} <b>Статус:</b>  {stock_s}\n"
         f"{seller_block}"
         f"━━━━━━━━━━━━━━━━━"
     )
@@ -994,7 +1010,7 @@ async def cb_buy(cb: types.CallbackQuery):
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data=f"prod_{pid}")])
 
     text = (
-        f"📐 <b>Выберите размер</b>\n\n"
+        f"{ae('size')} <b>Выберите размер</b>\n\n"
         f"<blockquote>Товар: <b>{p['name']}</b></blockquote>"
     )
     try:
@@ -1037,12 +1053,12 @@ async def _show_payment_confirm(cb: types.CallbackQuery, pid: int, size: str):
 
     text = (
         f"🛍 <b>Оформление заказа</b>\n\n"
-        f"📦 {p['name']}  ({size})\n"
+        f"{ae('box')} {p['name']}  ({size})\n"
         f"{ae('money')} <b>Цена:</b> <code>{fmt_price(p['price'])}</code> "
         f"(~{usd_amt} USDT)\n\n"
         f"━━━━━━━━━━━━━━━━━\n"
-        f"📞 <b>Телефон:</b> {phone_s}\n"
-        f"📍 <b>Адрес:</b> {address_s}\n"
+        f"{ae('phone')} <b>Телефон:</b> {phone_s}\n"
+        f"{ae('pin')} <b>Адрес:</b> {address_s}\n"
         f"━━━━━━━━━━━━━━━━━"
     )
 
@@ -1110,8 +1126,8 @@ async def cb_pcrypto(cb: types.CallbackQuery):
 
     text = (
         f"🔐 <b>Оплата через CryptoBot</b>\n\n"
-        f"📦 <b>Товар:</b> {p['name']}\n"
-        f"📐 <b>Размер:</b> {size}\n"
+        f"{ae('box')} <b>Товар:</b> {p['name']}\n"
+        f"{ae('size')} <b>Размер:</b> {size}\n"
         f"{ae('money')} <b>Сумма:</b> <code>{fmt_price(p['price'])}</code> "
         f"(~<b>{usd_amt} USDT</b>)\n\n"
         f"<blockquote>1. Нажмите «Оплатить»\n"
@@ -1175,10 +1191,10 @@ async def cb_chk(cb: types.CallbackQuery):
     await bot.send_message(
         uid,
         f"🎉 <b>Оплата подтверждена! Заказ #{oid} оформлен.</b>\n\n"
-        f"📦 {product['name']}  ({size})\n"
+        f"{ae('box')} {product['name']}  ({size})\n"
         f"{ae('money')} {fmt_price(price)}\n"
-        f"📞 {user['phone']}\n"
-        f"📍 {user['default_address']}\n\n"
+        f"{ae('phone')} {user['phone']}\n"
+        f"{ae('pin')} {user['default_address']}\n\n"
         f"{ae('gift')} Кэшбэк: <b>{fmt_price(bonus)}</b> на бонусный счёт\n\n"
         f"<blockquote>Мы свяжемся с вами для согласования доставки.</blockquote>",
         parse_mode="HTML",
@@ -1202,7 +1218,7 @@ async def cb_pkaspi(cb: types.CallbackQuery):
 
     text = (
         f"🏦 <b>Оплата через Kaspi</b>\n\n"
-        f"📦 <b>Товар:</b> {p['name']}  ({size})\n"
+        f"{ae('box')} <b>Товар:</b> {p['name']}  ({size})\n"
         f"{ae('money')} <b>Сумма:</b> <code>{fmt_price(p['price'])}</code>\n\n"
         f"━━━━━━━━━━━━━━━━━\n"
         f"📱 Номер для перевода:\n"
@@ -1247,11 +1263,11 @@ async def cb_kpaid(cb: types.CallbackQuery):
     mgr_text = (
         f"🏦 <b>ЗАЯВКА KASPI #{kid}</b>\n\n"
         f"━━━━━━━━━━━━━━━━━\n"
-        f"👤 @{uname} (<code>{kp['user_id']}</code>)\n"
-        f"📦 <b>Товар:</b> {product['name']}  ({size})\n"
+        f"{ae('user')} @{uname} (<code>{kp['user_id']}</code>)\n"
+        f"{ae('box')} <b>Товар:</b> {product['name']}  ({size})\n"
         f"{ae('money')} <b>Сумма:</b> {fmt_price(kp['amount'])}\n"
-        f"📞 <b>Телефон:</b> {user['phone'] if user else '—'}\n"
-        f"📍 <b>Адрес:</b> {user['default_address'] if user else '—'}\n"
+        f"{ae('phone')} <b>Телефон:</b> {user['phone'] if user else '—'}\n"
+        f"{ae('pin')} <b>Адрес:</b> {user['default_address'] if user else '—'}\n"
         f"{ae('cal')} {fmt_dt()}\n"
         f"━━━━━━━━━━━━━━━━━\n\n"
         f"<blockquote>Проверьте поступление перевода:</blockquote>"
@@ -1337,7 +1353,7 @@ async def cb_kapprove(cb: types.CallbackQuery):
         await bot.send_message(
             kp['user_id'],
             f"✅ <b>Оплата подтверждена! Заказ #{oid} оформлен.</b>\n\n"
-            f"📦 {product['name']}  ({size})\n"
+            f"{ae('box')} {product['name']}  ({size})\n"
             f"{ae('money')} {fmt_price(kp['amount'])}\n"
             f"{ae('gift')} Кэшбэк: <b>{fmt_price(bonus)}</b>\n\n"
             f"<blockquote>Ожидайте уведомлений о статусе доставки!</blockquote>",
@@ -1365,7 +1381,7 @@ async def cb_kreject(cb: types.CallbackQuery):
         await bot.send_message(
             kp['user_id'],
             f"❌ <b>Оплата отклонена</b>\n\n"
-            f"📦 {product['name']} — {fmt_price(kp['amount'])}\n\n"
+            f"{ae('box')} {product['name']} — {fmt_price(kp['amount'])}\n\n"
             f"<blockquote>Менеджер не нашёл перевод. "
             f"Если уверены в оплате — напишите: {SUPPORT_USERNAME}</blockquote>",
             parse_mode="HTML",
@@ -1396,13 +1412,13 @@ async def _notify_manager_new_order(oid, uid, uname, product,
     text = (
         f"🛍 <b>НОВЫЙ ЗАКАЗ #{oid}</b>\n\n"
         f"━━━━━━━━━━━━━━━━━\n"
-        f"👤 @{uname or '—'} (<code>{uid}</code>)\n"
-        f"📦 <b>Товар:</b> {product['name']}\n"
-        f"📐 <b>Размер:</b> {size}\n"
+        f"{ae('user')} @{uname or '—'} (<code>{uid}</code>)\n"
+        f"{ae('box')} <b>Товар:</b> {product['name']}\n"
+        f"{ae('size')} <b>Размер:</b> {size}\n"
         f"{ae('money')} <b>Сумма:</b> {fmt_price(price)}\n"
         f"💳 <b>Оплата:</b> {method}\n"
-        f"📞 <b>Телефон:</b> {phone or '—'}\n"
-        f"📍 <b>Адрес:</b> {address or '—'}\n"
+        f"{ae('phone')} <b>Телефон:</b> {phone or '—'}\n"
+        f"{ae('pin')} <b>Адрес:</b> {address or '—'}\n"
         f"{ae('cal')} {fmt_dt()}\n"
         f"━━━━━━━━━━━━━━━━━"
     )
@@ -1472,7 +1488,7 @@ async def cb_setordst(cb: types.CallbackQuery):
             await bot.send_message(
                 order['user_id'],
                 f"🚚 <b>Ваш заказ #{oid} доставлен!</b>\n\n"
-                f"📦 {product['name']}  ({order['size']})\n\n"
+                f"{ae('box')} {product['name']}  ({order['size']})\n\n"
                 f"<blockquote>Пожалуйста, подтвердите получение:</blockquote>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -1486,7 +1502,7 @@ async def cb_setordst(cb: types.CallbackQuery):
             await bot.send_message(
                 order['user_id'],
                 f"{ae('truck')} <b>Статус заказа #{oid} обновлён</b>\n\n"
-                f"📦 {product['name']}  ({order['size']})\n"
+                f"{ae('box')} {product['name']}  ({order['size']})\n"
                 f"🔄 <b>Новый статус:</b> {order_status_text(status)}",
                 parse_mode="HTML"
             )
@@ -1604,7 +1620,7 @@ async def cb_adm_stats(cb: types.CallbackQuery):
         f"👥 Пользователей: <b>{uc}</b>\n"
         f"{ae('cart')} Заказов: <b>{pc}</b>\n"
         f"{ae('money')} Выручка: <b>{fmt_price(rv)}</b>\n"
-        f"📦 Товаров: <b>{ac}</b>\n"
+        f"{ae('box')} Товаров: <b>{ac}</b>\n"
         f"🔄 В работе: <b>{oc}</b>\n"
         f"━━━━━━━━━━━━━━━━━"
     )
@@ -1898,13 +1914,13 @@ async def cb_vprod(cb: types.CallbackQuery):
         return
     sizes = parse_sizes(p)
     text  = (
-        f"📦 <b>{p['name']}</b>\n\n"
+        f"{ae('box')} <b>{p['name']}</b>\n\n"
         f"{p['description']}\n\n"
         f"━━━━━━━━━━━━━━━━━\n"
         f"{ae('money')} <b>Цена:</b> {fmt_price(p['price'])}\n"
-        f"📐 <b>Размеры:</b> {', '.join(sizes) or '—'}\n"
-        f"📦 <b>Остаток:</b> {p['stock']} шт.\n"
-        f"📞 <b>Тел. продавца:</b> {p['seller_phone'] or '—'}\n"
+        f"{ae('size')} <b>Размеры:</b> {', '.join(sizes) or '—'}\n"
+        f"{ae('box')} <b>Остаток:</b> {p['stock']} шт.\n"
+        f"{ae('phone')} <b>Тел. продавца:</b> {p['seller_phone'] or '—'}\n"
         f"💬 <b>TG продавца:</b> "
         f"{'@' + p['seller_username'] if p['seller_username'] else '—'}\n"
         f"━━━━━━━━━━━━━━━━━"
@@ -2107,10 +2123,10 @@ async def proc_prod_seller_un(msg: types.Message, state: FSMContext):
     sizes_str = ', '.join(d.get('sizes', [])) or '—'
     await msg.answer(
         f"✅ <b>Товар добавлен!</b>\n\n"
-        f"📐 Размеры: {sizes_str}\n"
-        f"📦 Остаток: {d['stock']} шт.\n"
+        f"{ae('size')} Размеры: {sizes_str}\n"
+        f"{ae('box')} Остаток: {d['stock']} шт.\n"
         f"{ae('money')} Цена: {fmt_price(d['price'])}\n"
-        f"📞 Продавец: {d.get('seller_phone', '—')}\n"
+        f"{ae('phone')} Продавец: {d.get('seller_phone', '—')}\n"
         f"💬 TG: {'@' + seller_un if seller_un else '—'}",
         parse_mode="HTML",
         reply_markup=kb_admin_back()
