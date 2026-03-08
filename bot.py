@@ -9,6 +9,8 @@ import asyncio
 import logging
 import os
 import json
+import io
+import zipfile
 import aiosqlite
 import aiohttp
 import ssl
@@ -91,9 +93,16 @@ class AdminSt(StatesGroup):
     add_prod_price      = State()
     add_prod_sizes      = State()
     add_prod_stock      = State()
-    add_prod_seller_ph  = State()   # телефон продавца (обязательно)
-    add_prod_seller_un  = State()   # юзернейм продавца (необязательно)
+    add_prod_seller_ph  = State()
+    add_prod_seller_un  = State()
+    add_prod_card       = State()   # шаг 8: карточка товара (фото/видео 16:9)
+    add_prod_gallery    = State()   # шаг 9: ZIP-галерея (до 10 фото/видео)
     edit_shop_info      = State()
+    set_custom_status   = State()   # произвольный статус заказа
+
+class AdSt(StatesGroup):
+    """Оформление рекламы."""
+    description = State()
 
 class ProfileSt(StatesGroup):
     """Редактирование профиля."""
@@ -147,6 +156,9 @@ async def init_db():
                 stock           INTEGER DEFAULT 0,
                 seller_username TEXT    DEFAULT '',
                 seller_phone    TEXT    DEFAULT '',
+                card_file_id    TEXT    DEFAULT '',
+                card_media_type TEXT    DEFAULT '',
+                gallery         TEXT    DEFAULT '[]',
                 is_active       INTEGER DEFAULT 1,
                 created_at      TEXT,
                 FOREIGN KEY (category_id) REFERENCES categories(id)
@@ -216,6 +228,16 @@ async def init_db():
                 rating     INTEGER,
                 comment    TEXT,
                 created_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS ad_requests (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER,
+                description TEXT,
+                method      TEXT    DEFAULT 'crypto',
+                amount      REAL    DEFAULT 500,
+                status      TEXT    DEFAULT 'pending',
+                created_at  TEXT
             );
         ''')
         await db.commit()
@@ -291,15 +313,20 @@ async def get_product(pid: int):
     return await db_one('SELECT * FROM products WHERE id=?', (pid,))
 
 async def add_product(cid, name, desc, price, sizes_list,
-                      stock, seller_username='', seller_phone=''):
-    sizes_json = json.dumps(sizes_list, ensure_ascii=False)
+                      stock, seller_username='', seller_phone='',
+                      card_file_id='', card_media_type='', gallery=None):
+    sizes_json   = json.dumps(sizes_list, ensure_ascii=False)
+    gallery_json = json.dumps(gallery or [], ensure_ascii=False)
     await db_run(
         '''INSERT INTO products
            (category_id, name, description, price, sizes, stock,
-            seller_username, seller_phone, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            seller_username, seller_phone,
+            card_file_id, card_media_type, gallery, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (cid, name, desc, price, sizes_json, stock,
-         seller_username, seller_phone, datetime.now().isoformat())
+         seller_username, seller_phone,
+         card_file_id, card_media_type, gallery_json,
+         datetime.now().isoformat())
     )
 
 async def del_product(pid: int):
@@ -360,6 +387,21 @@ async def get_reviews(pid, limit=10):
         'SELECT * FROM reviews WHERE product_id=? ORDER BY created_at DESC LIMIT ?',
         (pid, limit)
     )
+
+# ── Реклама ────────────────────────────────────
+AD_PRICE_KZT: float = 500.0
+
+async def create_ad_request(uid, description, method):
+    return await db_insert(
+        'INSERT INTO ad_requests(user_id,description,method,amount,created_at) VALUES(?,?,?,?,?)',
+        (uid, description, method, AD_PRICE_KZT, datetime.now().isoformat())
+    )
+
+async def get_ad_request(aid):
+    return await db_one('SELECT * FROM ad_requests WHERE id=?', (aid,))
+
+async def set_ad_status(aid, status):
+    await db_run('UPDATE ad_requests SET status=? WHERE id=?', (status, aid))
 
 # ── Медиа / настройки ──────────────────────────
 async def set_media(key, mtype, fid):
@@ -626,7 +668,55 @@ async def txt_profile(msg: types.Message):
 async def txt_about(msg: types.Message):
     info = await get_setting("shop_info", "Информация о магазине пока не заполнена.")
     text = f"{ae('store')} <b>О магазине</b>\n\n<blockquote>{info}</blockquote>"
-    await send_media(msg.chat.id, text, "about_menu")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🤝 Партнёрство", callback_data="partnership")
+    ]])
+    await send_media(msg.chat.id, text, "about_menu", kb)
+
+@router.callback_query(F.data == "partnership")
+async def cb_partnership(cb: types.CallbackQuery):
+    text = (
+        f"{ae('store')} <b>Партнёрство с нами</b>\n\n"
+        f"<blockquote>"
+        f"Мы открыты для взаимовыгодного сотрудничества!\n\n"
+        f"🤝 <b>Что мы предлагаем:</b>\n"
+        f"• Размещение вашего товара в нашем каталоге\n"
+        f"• Рекламные интеграции в боте\n"
+        f"• Совместные акции и распродажи\n"
+        f"• Кросс-промо между магазинами\n\n"
+        f"📈 <b>Почему мы?</b>\n"
+        f"• Активная аудитория покупателей Шымкента\n"
+        f"• Прозрачные условия сотрудничества\n"
+        f"• Быстрая обратная связь\n"
+        f"• Честные отзывы реальных покупателей\n\n"
+        f"Если вас интересует сотрудничество — "
+        f"напишите нашему менеджеру, и мы обсудим детали!"
+        f"</blockquote>"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✉️ Связаться",
+                              url=f"https://t.me/{SUPPORT_USERNAME.lstrip('@')}")],
+        [InlineKeyboardButton(text="📢 Разместить рекламу", callback_data="ad_warning")],
+        [InlineKeyboardButton(text="‹ Назад", callback_data="about_back")],
+    ])
+    try:
+        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        await cb.message.answer(text, parse_mode="HTML", reply_markup=kb)
+    await cb.answer()
+
+@router.callback_query(F.data == "about_back")
+async def cb_about_back(cb: types.CallbackQuery):
+    info = await get_setting("shop_info", "Информация о магазине пока не заполнена.")
+    text = f"{ae('store')} <b>О магазине</b>\n\n<blockquote>{info}</blockquote>"
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🤝 Партнёрство", callback_data="partnership")
+    ]])
+    try:
+        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        await cb.message.answer(text, parse_mode="HTML", reply_markup=kb)
+    await cb.answer()
 
 @router.message(F.text == "❓ Поддержка")
 async def txt_support(msg: types.Message):
@@ -891,6 +981,9 @@ async def cb_cat(cb: types.CallbackQuery):
             callback_data=f"prod_{p['id']}"
         )])
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="shop")])
+    kb_rows.append([InlineKeyboardButton(
+        text="📢 Подключить рекламу", callback_data="ad_warning"
+    )])
     text = f"<blockquote>{ae('down')} Выберите товар:</blockquote>"
     try:
         await cb.message.edit_text(text, parse_mode="HTML",
@@ -916,7 +1009,6 @@ async def cb_prod(cb: types.CallbackQuery):
     stock   = p['stock']
     stock_s = f"✅ В наличии ({stock} шт.)" if stock > 0 else "❌ Нет в наличии"
 
-    # Контакты продавца
     seller_block = ""
     if p['seller_phone'] or p['seller_username']:
         seller_block = "━━━━━━━━━━━━━━━━━\n"
@@ -939,10 +1031,20 @@ async def cb_prod(cb: types.CallbackQuery):
         f"━━━━━━━━━━━━━━━━━"
     )
 
+    # Галерея
+    try:
+        gallery = json.loads(p['gallery'] or '[]')
+    except Exception:
+        gallery = []
+
     kb_rows = []
     if stock > 0:
         kb_rows.append([InlineKeyboardButton(
             text="🛒 Купить", callback_data=f"buy_{pid}"
+        )])
+    if gallery:
+        kb_rows.append([InlineKeyboardButton(
+            text=f"🖼 Галерея ({len(gallery)})", callback_data=f"gallery_{pid}_0"
         )])
     kb_rows.append([InlineKeyboardButton(
         text="⭐ Отзывы", callback_data=f"reviews_{pid}"
@@ -955,8 +1057,24 @@ async def cb_prod(cb: types.CallbackQuery):
         await cb.message.delete()
     except Exception:
         pass
-    await send_media(cb.from_user.id, text, f"product_{pid}",
-                     InlineKeyboardMarkup(inline_keyboard=kb_rows))
+
+    # Если есть карточка товара — отправляем с медиа
+    card_fid = p.get('card_file_id', '')
+    card_mt  = p.get('card_media_type', '')
+    markup   = InlineKeyboardMarkup(inline_keyboard=kb_rows)
+    if card_fid and card_mt:
+        try:
+            if card_mt == 'photo':
+                await bot.send_photo(cb.from_user.id, card_fid,
+                                     caption=text, parse_mode="HTML", reply_markup=markup)
+            elif card_mt == 'video':
+                await bot.send_video(cb.from_user.id, card_fid,
+                                     caption=text, parse_mode="HTML", reply_markup=markup)
+            await cb.answer()
+            return
+        except Exception:
+            pass  # битое медиа — fallback на текст
+    await send_media(cb.from_user.id, text, f"product_{pid}", markup)
     await cb.answer()
 
 # ══════════════════════════════════════════════
@@ -986,8 +1104,66 @@ async def cb_reviews(cb: types.CallbackQuery):
     await cb.answer()
 
 # ══════════════════════════════════════════════
-#  Выбор размера
+#  Галерея товара
 # ══════════════════════════════════════════════
+@router.callback_query(F.data.startswith("gallery_"))
+async def cb_gallery(cb: types.CallbackQuery):
+    parts = cb.data.split("_")
+    pid   = int(parts[1])
+    idx   = int(parts[2])
+    p     = await get_product(pid)
+    if not p:
+        await cb.answer("Товар не найден", show_alert=True)
+        return
+    try:
+        gallery = json.loads(p['gallery'] or '[]')
+    except Exception:
+        gallery = []
+    if not gallery:
+        await cb.answer("Галерея пуста", show_alert=True)
+        return
+
+    idx   = max(0, min(idx, len(gallery) - 1))
+    item  = gallery[idx]
+    fid   = item['file_id']
+    mt    = item['media_type']
+    total = len(gallery)
+
+    nav = []
+    if idx > 0:
+        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"gallery_{pid}_{idx-1}"))
+    nav.append(InlineKeyboardButton(text=f"{idx+1}/{total}", callback_data="noop"))
+    if idx < total - 1:
+        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"gallery_{pid}_{idx+1}"))
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        nav,
+        [InlineKeyboardButton(text="‹ К товару", callback_data=f"prod_{pid}")]
+    ])
+    caption = f"🖼 <b>Галерея</b>  {idx+1}/{total}  —  {p['name']}"
+
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+    try:
+        if mt == 'photo':
+            await bot.send_photo(cb.from_user.id, fid, caption=caption,
+                                 parse_mode="HTML", reply_markup=kb)
+        elif mt == 'video':
+            await bot.send_video(cb.from_user.id, fid, caption=caption,
+                                 parse_mode="HTML", reply_markup=kb)
+        else:
+            await bot.send_document(cb.from_user.id, fid, caption=caption,
+                                    parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        await bot.send_message(cb.from_user.id, "⚠️ Не удалось загрузить медиа галереи.",
+                               reply_markup=kb)
+    await cb.answer()
+
+@router.callback_query(F.data == "noop")
+async def cb_noop(cb: types.CallbackQuery):
+    await cb.answer()
 @router.callback_query(F.data.startswith("buy_"))
 async def cb_buy(cb: types.CallbackQuery):
     pid = int(cb.data.split("_")[1])
@@ -1432,7 +1608,7 @@ async def _notify_manager_new_order(oid, uid, uname, product,
         pass
 
 # ══════════════════════════════════════════════
-#  Управление статусами заказов
+#  Управление статусами заказов (произвольный статус)
 # ══════════════════════════════════════════════
 ORDER_STATUSES = ["processing", "china", "arrived", "delivered"]
 
@@ -1454,10 +1630,15 @@ async def cb_ordstatus(cb: types.CallbackQuery):
             text=f"{mark}{order_status_text(s)}",
             callback_data=f"setordst_{oid}_{s}"
         )])
+    # Кнопка произвольного статуса
+    kb_rows.append([InlineKeyboardButton(
+        text="✏️ Свой статус",
+        callback_data=f"customst_{oid}"
+    )])
     text = (
         f"📋 <b>Заказ #{oid}</b>\n"
         f"Статус: {order_status_text(order['status'])}\n\n"
-        f"<blockquote>Выберите новый статус:</blockquote>"
+        f"<blockquote>Выберите статус или введите свой:</blockquote>"
     )
     try:
         await cb.message.edit_text(text, parse_mode="HTML",
@@ -1466,6 +1647,58 @@ async def cb_ordstatus(cb: types.CallbackQuery):
         await cb.message.answer(text, parse_mode="HTML",
                                 reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
     await cb.answer()
+
+@router.callback_query(F.data.startswith("customst_"))
+async def cb_customst(cb: types.CallbackQuery, state: FSMContext):
+    if cb.from_user.id != MANAGER_ID and cb.from_user.id not in ADMIN_IDS:
+        await cb.answer("Нет доступа", show_alert=True)
+        return
+    oid = int(cb.data.split("_")[1])
+    await state.update_data(custom_oid=oid)
+    await state.set_state(AdminSt.set_custom_status)
+    try:
+        await cb.message.edit_text(
+            f"✏️ <b>Произвольный статус для заказа #{oid}</b>\n\n"
+            f"<blockquote>Введите текст статуса (например: «Сортировочный центр»):</blockquote>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="‹ Назад",
+                                     callback_data=f"ordstatus_{oid}")
+            ]])
+        )
+    except Exception:
+        pass
+    await cb.answer()
+
+@router.message(AdminSt.set_custom_status)
+async def proc_custom_status(msg: types.Message, state: FSMContext):
+    d      = await state.get_data()
+    oid    = d.get('custom_oid')
+    status = msg.text.strip()[:100]
+    await state.clear()
+    if not oid:
+        await msg.answer("❌ Ошибка: заказ не найден.", reply_markup=kb_admin_back())
+        return
+
+    order   = await get_order(oid)
+    product = await get_product(order['product_id']) if order else None
+    await set_order_status(oid, status)
+
+    try:
+        await bot.send_message(
+            order['user_id'],
+            f"{ae('truck')} <b>Статус заказа #{oid} обновлён</b>\n\n"
+            f"{ae('box')} {product['name']}  ({order['size']})\n"
+            f"🔄 <b>Новый статус:</b> {status}",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+    await msg.answer(
+        f"✅ <b>Статус заказа #{oid} обновлён:</b>\n<i>{status}</i>",
+        parse_mode="HTML",
+        reply_markup=kb_admin_back()
+    )
 
 @router.callback_query(F.data.startswith("setordst_"))
 async def cb_setordst(cb: types.CallbackQuery):
@@ -1589,6 +1822,300 @@ async def review_comment(msg: types.Message, state: FSMContext):
         parse_mode="HTML",
         reply_markup=kb_main()
     )
+
+# ══════════════════════════════════════════════
+#  РЕКЛАМА
+# ══════════════════════════════════════════════
+AD_WARNING_TEXT = (
+    "⚠️ <b>ВАЖНО! ОЗНАКОМЬТЕСЬ ДО ОПЛАТЫ</b>\n\n"
+    "Уважаемые рекламодатели! Прежде чем оплатить заказ, пожалуйста, "
+    "внимательно прочитайте этот список. Мы дорожим репутацией нашей "
+    "площадки и сразу хотим быть с вами честными.\n\n"
+    "<b>МЫ НЕ РЕКЛАМИРУЕМ следующие тематики НИ ПРИ КАКИХ УСЛОВИЯХ:</b>\n\n"
+    "<b>1. МОШЕННИЧЕСТВО И ФИНАНСОВЫЕ ПИРАМИДЫ</b>\n"
+    "❌ Финансовые пирамиды, хайпы, сомнительные инвестиции.\n"
+    "❌ Заработок в интернете «без вложений» с обещанием золотых гор.\n"
+    "❌ Продажа баз данных, слитой информации, взломов.\n"
+    "❌ Курсы-однодневки по типу «как стать миллионером за час».\n\n"
+    "<b>2. СПАМ И НАКРУТКИ</b>\n"
+    "❌ Программы для рассылок (спам-софт).\n"
+    "❌ Базы телефонных номеров и email-адресов.\n"
+    "❌ Накрутка подписчиков, лайков, просмотров (боты и сервисы).\n\n"
+    "<b>3. АЗАРТНЫЕ ИГРЫ</b>\n"
+    "❌ Онлайн-казино, игровые автоматы.\n"
+    "❌ Букмекерские конторы без лицензии.\n"
+    "❌ Тотализаторы, покер-румы.\n\n"
+    "<b>4. ВЗРОСЛЫЙ КОНТЕНТ (18+)</b>\n"
+    "❌ Порно, эротика, интим-услуги.\n"
+    "❌ Сайты знакомств для взрослых.\n"
+    "❌ Массаж «с продолжением» и подобные услуги.\n\n"
+    "<b>5. ТОВАРЫ И УСЛУГИ БЕЗ ДОКАЗАТЕЛЬСТВ</b>\n"
+    "❌ «Чудо-лекарства», БАДы с агрессивным маркетингом.\n"
+    "❌ Лечение тяжёлых болезней народными методами.\n"
+    "❌ Маги, целители, снятие порчи, гадание.\n"
+    "❌ Частные мастера без портфолио и гарантий.\n\n"
+    "<b>6. ПОЛИТИКА И РЕЛИГИЯ</b>\n"
+    "❌ Любая политическая агитация.\n"
+    "❌ Религиозные проповеди и секты.\n"
+    "❌ Разжигание межнациональной розни.\n\n"
+    "<b>7. ПРЯМЫЕ КОНКУРЕНТЫ</b>\n"
+    "❌ Магазины с товарами, совпадающими с нашим ассортиментом "
+    "(по усмотрению администрации).\n\n"
+    "⚠️ <b>ЕСЛИ ВАШ ТОВАР ИЛИ УСЛУГА ЕСТЬ В ЭТОМ СПИСКЕ:</b>\n"
+    "Пожалуйста, <b>НЕ ОПЛАЧИВАЙТЕ ЗАКАЗ</b>. Мы всё равно вернём деньги. "
+    "Сэкономьте своё время и наше.\n\n"
+    "Если вы не нашли свою тематику в списке — смело оформляйте заказ! "
+    "Будем рады сотрудничеству!"
+)
+
+@router.callback_query(F.data == "ad_warning")
+async def cb_ad_warning(cb: types.CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Ознакомлен, продолжить",
+                              callback_data="ad_continue")],
+        [InlineKeyboardButton(text="‹ Назад", callback_data="shop")],
+    ])
+    try:
+        await cb.message.edit_text(AD_WARNING_TEXT, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        await cb.message.answer(AD_WARNING_TEXT, parse_mode="HTML", reply_markup=kb)
+    await cb.answer()
+
+@router.callback_query(F.data == "ad_continue")
+async def cb_ad_continue(cb: types.CallbackQuery, state: FSMContext):
+    await state.set_state(AdSt.description)
+    text = (
+        "📢 <b>Оформление рекламы</b>\n\n"
+        f"<blockquote>Стоимость размещения: <b>{fmt_price(AD_PRICE_KZT)}</b>\n\n"
+        f"Опишите вашу рекламу:\n"
+        f"• Что рекламируете\n"
+        f"• Ссылка / контакт / описание\n"
+        f"• Пожелания по формату</blockquote>"
+    )
+    try:
+        await cb.message.edit_text(text, parse_mode="HTML",
+                                   reply_markup=kb_back("ad_warning"))
+    except Exception:
+        await cb.message.answer(text, parse_mode="HTML",
+                                reply_markup=kb_back("ad_warning"))
+    await cb.answer()
+
+@router.message(AdSt.description)
+async def proc_ad_description(msg: types.Message, state: FSMContext):
+    await state.update_data(ad_desc=msg.text.strip())
+    text = (
+        "📢 <b>Выберите способ оплаты</b>\n\n"
+        f"Стоимость: <b>{fmt_price(AD_PRICE_KZT)}</b>\n\n"
+        f"<blockquote>Ваша реклама:\n{msg.text.strip()[:200]}</blockquote>"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔐 CryptoBot (USDT)",
+                              callback_data="ad_pay_crypto")],
+        [InlineKeyboardButton(text="🏦 Kaspi",
+                              callback_data="ad_pay_kaspi")],
+    ])
+    await msg.answer(text, parse_mode="HTML", reply_markup=kb)
+
+@router.callback_query(F.data == "ad_pay_crypto")
+async def cb_ad_pay_crypto(cb: types.CallbackQuery, state: FSMContext):
+    d    = await state.get_data()
+    desc = d.get('ad_desc', '')
+    rate    = await get_usd_kzt_rate()
+    usd_amt = kzt_to_usd(AD_PRICE_KZT, rate)
+
+    inv = await create_invoice(usd_amt, f"Реклама в боте", f"ad:{cb.from_user.id}")
+    if not inv:
+        await cb.answer("⚠️ Ошибка создания счёта. Попробуйте позже.", show_alert=True)
+        return
+
+    await state.update_data(ad_inv_id=str(inv['invoice_id']))
+    text = (
+        f"🔐 <b>Оплата рекламы через CryptoBot</b>\n\n"
+        f"{ae('money')} <b>Сумма:</b> <code>{fmt_price(AD_PRICE_KZT)}</code> "
+        f"(~<b>{usd_amt} USDT</b>)\n\n"
+        f"<blockquote>1. Нажмите «Оплатить»\n"
+        f"2. Вернитесь в бот\n"
+        f"3. Нажмите «Проверить оплату»</blockquote>"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Оплатить", url=inv['pay_url'])],
+        [InlineKeyboardButton(text="✅ Проверить оплату",
+                              callback_data=f"ad_chk_{inv['invoice_id']}")],
+    ])
+    try:
+        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        await cb.message.answer(text, parse_mode="HTML", reply_markup=kb)
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("ad_chk_"))
+async def cb_ad_chk(cb: types.CallbackQuery, state: FSMContext):
+    inv_id = cb.data[7:]
+    inv    = await check_invoice(inv_id)
+    if not inv:
+        await cb.answer("⚠️ Ошибка проверки. Попробуйте позже.", show_alert=True)
+        return
+    if inv['status'] != 'paid':
+        await cb.answer("⏳ Оплата ещё не поступила.", show_alert=True)
+        return
+
+    d    = await state.get_data()
+    desc = d.get('ad_desc', '—')
+    await state.clear()
+
+    aid = await create_ad_request(cb.from_user.id, desc, 'crypto')
+    await _notify_manager_ad(aid, cb.from_user, desc, 'CryptoBot')
+
+    await cb.message.edit_text(
+        f"🎉 <b>Оплата получена! Заявка на рекламу #{aid} принята.</b>\n\n"
+        f"<blockquote>Менеджер свяжется с вами в ближайшее время.</blockquote>",
+        parse_mode="HTML", reply_markup=kb_main()
+    )
+    await cb.answer("✅ Готово!")
+
+@router.callback_query(F.data == "ad_pay_kaspi")
+async def cb_ad_pay_kaspi(cb: types.CallbackQuery, state: FSMContext):
+    d   = await state.get_data()
+    desc = d.get('ad_desc', '')
+
+    text = (
+        f"🏦 <b>Оплата рекламы через Kaspi</b>\n\n"
+        f"{ae('money')} <b>Сумма:</b> <code>{fmt_price(AD_PRICE_KZT)}</code>\n\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"📱 Номер для перевода:\n<code>{KASPI_PHONE}</code>\n"
+        f"━━━━━━━━━━━━━━━━━\n\n"
+        f"<blockquote>После перевода нажмите «Я оплатил»</blockquote>"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Я оплатил", callback_data="ad_kaspi_paid")],
+    ])
+    try:
+        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        await cb.message.answer(text, parse_mode="HTML", reply_markup=kb)
+    await cb.answer()
+
+@router.callback_query(F.data == "ad_kaspi_paid")
+async def cb_ad_kaspi_paid(cb: types.CallbackQuery, state: FSMContext):
+    d    = await state.get_data()
+    desc = d.get('ad_desc', '—')
+    await state.clear()
+
+    aid = await create_ad_request(cb.from_user.id, desc, 'kaspi')
+
+    # Уведомление менеджеру с кнопками подтверждения
+    mgr_text = (
+        f"📢 <b>ЗАЯВКА НА РЕКЛАМУ #{aid} (Kaspi)</b>\n\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"{ae('user')} @{cb.from_user.username or '—'} "
+        f"(<code>{cb.from_user.id}</code>)\n"
+        f"{ae('money')} <b>Сумма:</b> {fmt_price(AD_PRICE_KZT)} (Kaspi)\n"
+        f"📝 <b>Описание:</b>\n<blockquote>{desc[:500]}</blockquote>\n"
+        f"{ae('cal')} {fmt_dt()}\n"
+        f"━━━━━━━━━━━━━━━━━\n\n"
+        f"<blockquote>Проверьте поступление перевода:</blockquote>"
+    )
+    mgr_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Подтвердить",
+                             callback_data=f"ad_approve_{aid}"),
+        InlineKeyboardButton(text="❌ Отклонить",
+                             callback_data=f"ad_reject_{aid}"),
+    ]])
+    try:
+        await bot.send_message(MANAGER_ID, mgr_text, parse_mode="HTML", reply_markup=mgr_kb)
+    except Exception:
+        pass
+
+    try:
+        await cb.message.edit_text(
+            f"⏳ <b>Заявка на рекламу #{aid} отправлена менеджеру.</b>\n\n"
+            f"<blockquote>Ожидайте подтверждения оплаты.</blockquote>",
+            parse_mode="HTML", reply_markup=kb_main()
+        )
+    except Exception:
+        pass
+    await cb.answer("✅ Заявка отправлена!")
+
+@router.callback_query(F.data.startswith("ad_approve_"))
+async def cb_ad_approve(cb: types.CallbackQuery):
+    if cb.from_user.id != MANAGER_ID and cb.from_user.id not in ADMIN_IDS:
+        await cb.answer("Нет доступа", show_alert=True)
+        return
+    aid = int(cb.data.split("_")[2])
+    ar  = await get_ad_request(aid)
+    if not ar:
+        await cb.answer("Заявка не найдена", show_alert=True)
+        return
+    if ar['status'] != 'pending':
+        await cb.answer("Уже обработана", show_alert=True)
+        return
+    await set_ad_status(aid, 'approved')
+    try:
+        await bot.send_message(
+            ar['user_id'],
+            f"✅ <b>Оплата рекламы подтверждена! Заявка #{aid} принята.</b>\n\n"
+            f"<blockquote>Менеджер свяжется с вами для запуска рекламы.</blockquote>",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+    who = cb.from_user.username or str(cb.from_user.id)
+    try:
+        await cb.message.edit_text(
+            cb.message.html_text + f"\n\n✅ <b>ПОДТВЕРЖДЕНО</b> — @{who}",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+    await cb.answer("✅ Реклама подтверждена!")
+
+@router.callback_query(F.data.startswith("ad_reject_"))
+async def cb_ad_reject(cb: types.CallbackQuery):
+    if cb.from_user.id != MANAGER_ID and cb.from_user.id not in ADMIN_IDS:
+        await cb.answer("Нет доступа", show_alert=True)
+        return
+    aid = int(cb.data.split("_")[2])
+    ar  = await get_ad_request(aid)
+    if not ar or ar['status'] != 'pending':
+        await cb.answer("Заявка уже обработана", show_alert=True)
+        return
+    await set_ad_status(aid, 'rejected')
+    try:
+        await bot.send_message(
+            ar['user_id'],
+            f"❌ <b>Оплата рекламы #{aid} не подтверждена.</b>\n\n"
+            f"<blockquote>Если вы уверены в оплате — "
+            f"свяжитесь с поддержкой: {SUPPORT_USERNAME}</blockquote>",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+    who = cb.from_user.username or str(cb.from_user.id)
+    try:
+        await cb.message.edit_text(
+            cb.message.html_text + f"\n\n❌ <b>ОТКЛОНЕНО</b> — @{who}",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+    await cb.answer("❌ Отклонено")
+
+async def _notify_manager_ad(aid, tg_user, desc, method):
+    text = (
+        f"📢 <b>НОВАЯ ЗАЯВКА НА РЕКЛАМУ #{aid}</b>\n\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"{ae('user')} @{tg_user.username or '—'} (<code>{tg_user.id}</code>)\n"
+        f"{ae('money')} <b>Сумма:</b> {fmt_price(AD_PRICE_KZT)}\n"
+        f"💳 <b>Оплата:</b> {method}\n"
+        f"📝 <b>Описание:</b>\n<blockquote>{desc[:500]}</blockquote>\n"
+        f"{ae('cal')} {fmt_dt()}\n"
+        f"━━━━━━━━━━━━━━━━━"
+    )
+    try:
+        await bot.send_message(MANAGER_ID, text, parse_mode="HTML")
+    except Exception:
+        pass
+
 
 # ══════════════════════════════════════════════
 #  ADMIN PANEL
@@ -2086,7 +2613,7 @@ async def proc_prod_stock(msg: types.Message, state: FSMContext):
     await state.update_data(stock=stock)
     await state.set_state(AdminSt.add_prod_seller_ph)
     await msg.answer(
-        "📦 <b>Шаг 7/7 — Телефон продавца</b>\n\n"
+        "📦 <b>Шаг 7/9 — Телефон продавца</b>\n\n"
         "<blockquote>Введите номер телефона продавца:\n"
         "<i>Пример: +7 701 234 56 78</i></blockquote>",
         parse_mode="HTML",
@@ -2100,7 +2627,7 @@ async def proc_prod_seller_ph(msg: types.Message, state: FSMContext):
     await state.update_data(seller_phone=msg.text.strip())
     await state.set_state(AdminSt.add_prod_seller_un)
     await msg.answer(
-        "📦 <b>Telegram-юзернейм продавца (необязательно)</b>\n\n"
+        "📦 <b>Шаг 7/9 — Telegram-юзернейм продавца</b>\n\n"
         "<blockquote>Введите @username или напишите <b>нет</b>:</blockquote>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -2112,25 +2639,192 @@ async def proc_prod_seller_ph(msg: types.Message, state: FSMContext):
 async def proc_prod_seller_un(msg: types.Message, state: FSMContext):
     raw       = msg.text.strip()
     seller_un = "" if raw.lower() in ("нет", "no", "-", "—") else raw.lstrip("@")
+    await state.update_data(seller_un=seller_un)
+    await state.set_state(AdminSt.add_prod_card)
+    await msg.answer(
+        "📦 <b>Шаг 8/9 — Карточка товара</b>\n\n"
+        "<blockquote>Отправьте фото или видео для карточки товара.\n"
+        "Рекомендуется формат <b>16:9</b>.\n\n"
+        "Эта карточка будет показываться при открытии товара.\n\n"
+        "Напишите <b>нет</b> чтобы пропустить.</blockquote>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="‹ Назад", callback_data="addprod")
+        ]])
+    )
+
+@router.message(AdminSt.add_prod_card,
+                F.content_type.in_([ContentType.PHOTO, ContentType.VIDEO]))
+async def proc_prod_card_media(msg: types.Message, state: FSMContext):
+    if msg.photo:
+        fid, mt = msg.photo[-1].file_id, 'photo'
+    else:
+        fid, mt = msg.video.file_id, 'video'
+    await state.update_data(card_fid=fid, card_mt=mt)
+    await state.set_state(AdminSt.add_prod_gallery)
+    await msg.answer(
+        "📦 <b>Шаг 9/9 — Галерея товара</b>\n\n"
+        "<blockquote>Отправьте ZIP-архив с фото и/или видео товара.\n\n"
+        "⚠️ Требования:\n"
+        "• Только <b>JPG/PNG/MP4</b> файлы\n"
+        "• Максимум <b>10</b> файлов\n"
+        "• Без пароля\n"
+        "• Без других файлов\n\n"
+        "Напишите <b>нет</b> чтобы пропустить.</blockquote>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="‹ Назад", callback_data="addprod")
+        ]])
+    )
+
+@router.message(AdminSt.add_prod_card, F.text)
+async def proc_prod_card_skip(msg: types.Message, state: FSMContext):
+    if msg.text.strip().lower() in ("нет", "no", "-", "—"):
+        await state.update_data(card_fid='', card_mt='')
+        await state.set_state(AdminSt.add_prod_gallery)
+        await msg.answer(
+            "📦 <b>Шаг 9/9 — Галерея товара</b>\n\n"
+            "<blockquote>Отправьте ZIP-архив с фото и/или видео.\n"
+            "Напишите <b>нет</b> чтобы пропустить.</blockquote>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="‹ Назад", callback_data="addprod")
+            ]])
+        )
+    else:
+        await msg.answer("⚠️ Отправьте фото/видео или напишите <b>нет</b>.",
+                         parse_mode="HTML")
+
+@router.message(AdminSt.add_prod_gallery, F.document)
+async def proc_prod_gallery_zip(msg: types.Message, state: FSMContext):
+    """Обработка ZIP-архива с галереей товара."""
+    doc = msg.document
+    if not doc.file_name.lower().endswith('.zip'):
+        await msg.answer("❌ Отправьте файл формата <b>.zip</b> или напишите <b>нет</b>.",
+                         parse_mode="HTML")
+        return
+
+    # Скачиваем ZIP
+    import tempfile
+    status_msg = await msg.answer("⏳ Обрабатываю архив...")
+    try:
+        file_info = await bot.get_file(doc.file_id)
+        file_bytes = await bot.download_file(file_info.file_path)
+        zip_data   = file_bytes.read()
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Ошибка скачивания: {e}")
+        return
+
+    ALLOWED_EXT = {'.jpg', '.jpeg', '.png', '.mp4', '.mov'}
+    gallery_files = []
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
+            names = [n for n in zf.namelist()
+                     if not n.startswith('__MACOSX') and not n.endswith('/')]
+            # Фильтр по расширению
+            valid   = [n for n in names
+                       if os.path.splitext(n.lower())[1] in ALLOWED_EXT]
+            invalid = [n for n in names
+                       if os.path.splitext(n.lower())[1] not in ALLOWED_EXT
+                       and not n.endswith('.ds_store')]
+            if invalid:
+                await status_msg.edit_text(
+                    f"❌ Архив содержит недопустимые файлы:\n"
+                    + "\n".join(f"  • {n}" for n in invalid[:5]) +
+                    f"\n\nДопускаются только: JPG, PNG, MP4, MOV.\n"
+                    f"Отправьте архив заново или напишите <b>нет</b>.",
+                    parse_mode="HTML"
+                )
+                return
+            if len(valid) > 10:
+                await status_msg.edit_text(
+                    f"❌ В архиве <b>{len(valid)}</b> файлов. "
+                    f"Допустимо максимум <b>10</b>.\n\n"
+                    f"Пересоздайте архив с не более чем 10 файлами.",
+                    parse_mode="HTML"
+                )
+                return
+            if len(valid) == 0:
+                await status_msg.edit_text(
+                    "❌ В архиве нет подходящих фото/видео файлов.",
+                    parse_mode="HTML"
+                )
+                return
+
+            # Отправляем каждый файл боту чтобы получить file_id
+            await status_msg.edit_text(
+                f"⏳ Загружаю {len(valid)} файлов в Telegram..."
+            )
+            for name in valid:
+                ext  = os.path.splitext(name.lower())[1]
+                data = zf.read(name)
+                buf  = types.BufferedInputFile(data, filename=os.path.basename(name))
+                try:
+                    if ext in ('.jpg', '.jpeg', '.png'):
+                        sent = await bot.send_photo(msg.chat.id, buf)
+                        fid  = sent.photo[-1].file_id
+                        mt   = 'photo'
+                        await sent.delete()
+                    else:
+                        sent = await bot.send_video(msg.chat.id, buf)
+                        fid  = sent.video.file_id
+                        mt   = 'video'
+                        await sent.delete()
+                    gallery_files.append({'file_id': fid, 'media_type': mt})
+                except Exception as e:
+                    await msg.answer(f"⚠️ Не удалось загрузить {name}: {e}")
+    except zipfile.BadZipFile:
+        await status_msg.edit_text("❌ Файл повреждён или не является ZIP-архивом.")
+        return
+
+    await state.update_data(gallery=gallery_files)
+    await _finish_add_product(msg, state, status_msg)
+
+@router.message(AdminSt.add_prod_gallery, F.text)
+async def proc_prod_gallery_skip(msg: types.Message, state: FSMContext):
+    if msg.text.strip().lower() in ("нет", "no", "-", "—"):
+        await state.update_data(gallery=[])
+        await _finish_add_product(msg, state)
+    else:
+        await msg.answer(
+            "⚠️ Отправьте ZIP-архив с фото/видео или напишите <b>нет</b>.",
+            parse_mode="HTML"
+        )
+
+async def _finish_add_product(msg: types.Message, state: FSMContext,
+                               status_msg=None):
+    """Сохранить товар после всех шагов FSM."""
     d         = await state.get_data()
+    seller_un = d.get('seller_un', '')
+    gallery   = d.get('gallery', [])
     await add_product(
         d['cid'], d['name'], d['desc'],
         d['price'], d.get('sizes', []), d['stock'],
         seller_username=seller_un,
-        seller_phone=d.get('seller_phone', '')
+        seller_phone=d.get('seller_phone', ''),
+        card_file_id=d.get('card_fid', ''),
+        card_media_type=d.get('card_mt', ''),
+        gallery=gallery
     )
     await state.clear()
     sizes_str = ', '.join(d.get('sizes', [])) or '—'
-    await msg.answer(
+    result = (
         f"✅ <b>Товар добавлен!</b>\n\n"
         f"{ae('size')} Размеры: {sizes_str}\n"
         f"{ae('box')} Остаток: {d['stock']} шт.\n"
         f"{ae('money')} Цена: {fmt_price(d['price'])}\n"
         f"{ae('phone')} Продавец: {d.get('seller_phone', '—')}\n"
-        f"💬 TG: {'@' + seller_un if seller_un else '—'}",
-        parse_mode="HTML",
-        reply_markup=kb_admin_back()
+        f"💬 TG: {'@' + seller_un if seller_un else '—'}\n"
+        f"🖼 Карточка: {'✅' if d.get('card_fid') else '—'}\n"
+        f"📸 Галерея: {len(gallery)} фото/видео"
     )
+    if status_msg:
+        await status_msg.edit_text(result, parse_mode="HTML",
+                                   reply_markup=kb_admin_back())
+    else:
+        await msg.answer(result, parse_mode="HTML",
+                         reply_markup=kb_admin_back())
 
 # ── Настройки ──────────────────────────────────
 @router.callback_query(F.data == "adm_settings")
@@ -2181,7 +2875,8 @@ async def proc_shop_info(msg: types.Message, state: FSMContext):
 # ══════════════════════════════════════════════
 NAV_CALLBACKS = {
     "adm_panel", "adm_media", "adm_cats",
-    "adm_products", "addprod", "adm_settings"
+    "adm_products", "addprod", "adm_settings",
+    "ad_warning", "partnership", "about_back"
 }
 
 @router.callback_query(F.data.in_(NAV_CALLBACKS))
