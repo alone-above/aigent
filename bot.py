@@ -1,7 +1,7 @@
 """
 ╔══════════════════════════════════════════════════════╗
 ║   SHOPBOT — Магазин одежды / Шымкент, Казахстан     ║
-║   aiogram 3.x | Turso libSQL | CryptoPay | KZT       ║
+║   aiogram 3.x | aiosqlite | CryptoPay | KZT         ║
 ╚══════════════════════════════════════════════════════╝
 """
 
@@ -11,6 +11,7 @@ import os
 import json
 import io
 import zipfile
+import aiosqlite
 import aiohttp
 import ssl
 from datetime import datetime
@@ -45,184 +46,7 @@ USD_KZT_RATE: float = 494.0
 # Процент кэшбэка на бонусный баланс
 CASHBACK_PERCENT: float = 5.0
 
-# ══════════════════════════════════════════════
-#  Turso (libSQL) — облачная база данных
-#  Переменные окружения в .env:
-#    TURSO_URL   = libsql://xxx.turso.io
-#    TURSO_TOKEN = eyJ...
-# ══════════════════════════════════════════════
-TURSO_URL   = os.getenv("TURSO_URL",   "libsql://aloneaboveshop-ishowspeedw.aws-eu-west-1.turso.io")
-TURSO_TOKEN = os.getenv("TURSO_TOKEN", "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJleHAiOjE4MDQ1MjQ1NjgsImlhdCI6MTc3Mjk4ODU2OCwiaWQiOiIwMTljY2U1YS02ZTAxLTdiOWEtOTg5Yi0zZTAyZGVkM2UyY2IiLCJyaWQiOiI0NzgxYzE5MC1hMGJhLTQ3YjQtYTc0ZC1kNTJmOWNiMzhmYjYifQ.tBp0b2Bj9O53_b6OyblnvvvhnuKHeAlPMsYjjA0FR_kEqvktDK541mN_vrodPJ2_skH0S2PBCVyWN4M58ZxYBQ")
-
-_TURSO_HTTP = TURSO_URL.replace("libsql://", "https://") + "/v2/pipeline"
-_TURSO_HDR  = {"Authorization": f"Bearer {TURSO_TOKEN}", "Content-Type": "application/json"}
-
-# Глобальная aiohttp-сессия (переиспользуется для всех запросов к Turso)
-_http_session: aiohttp.ClientSession | None = None
-
-async def get_http_session() -> aiohttp.ClientSession:
-    global _http_session
-    if _http_session is None or _http_session.closed:
-        _http_session = aiohttp.ClientSession()
-    return _http_session
-
-def _to_turso_arg(v):
-    """Конвертация Python значений в hrana v2 формат.
-    ВАЖНО: integer и float — value должна быть СТРОКОЙ по протоколу hrana v2."""
-    if v is None:
-        return {"type": "null"}
-    if isinstance(v, bool):
-        return {"type": "integer", "value": "1" if v else "0"}
-    if isinstance(v, int):
-        return {"type": "integer", "value": str(v)}
-    if isinstance(v, float):
-        return {"type": "float", "value": str(v)}
-    return {"type": "text", "value": str(v)}
-
-def _coerce_row(row: dict) -> dict:
-    """Turso возвращает все числа как строки. Конвертируем обратно."""
-    out = {}
-    for k, v in row.items():
-        if v is None:
-            out[k] = v
-        elif isinstance(v, str):
-            # Попробуем int, потом float
-            try:
-                out[k] = int(v)
-                continue
-            except (ValueError, TypeError):
-                pass
-            try:
-                out[k] = float(v)
-                continue
-            except (ValueError, TypeError):
-                pass
-            out[k] = v
-        else:
-            out[k] = v
-    return out
-
-async def _turso(statements: list) -> list:
-    """
-    Выполняет список SQL-запросов через Turso HTTP API (hrana).
-    statements = [{"q": "SELECT ...", "params": [val, ...]}, ...]
-    Возвращает список результатов: [{"rows": [...], "last_insert_rowid": N}, ...]
-    """
-    # Debug: раскомментируй для диагностики
-    # for s in statements:
-    #     logging.info(f"SQL: {s['q'][:60]} | params: {s.get('params')}")
-    reqs = []
-    for s in statements:
-        stmt = {"sql": s["q"]}
-        if s.get("params") is not None and len(s["params"]) > 0:
-            stmt["args"] = [_to_turso_arg(v) for v in s["params"]]
-        reqs.append({"type": "execute", "stmt": stmt})
-    reqs.append({"type": "close"})
-
-    session = await get_http_session()
-    async with session.post(_TURSO_HTTP, headers=_TURSO_HDR,
-                            json={"requests": reqs}) as resp:
-        data = await resp.json()
-
-    results = []
-    for item in data.get("results", []):
-        t = item.get("type")
-        if t == "ok":
-            rs = item["response"].get("result", {})
-            cols = [c["name"] for c in rs.get("cols", [])]
-            rows = []
-            for row in rs.get("rows", []):
-                rows.append(_coerce_row(dict(zip(cols, [cell.get("value") for cell in row]))))
-            rid = rs.get("last_insert_rowid")
-            results.append({
-                "rows": rows,
-                "last_insert_rowid": rid,
-            })
-        elif t == "close":
-            pass
-        elif t == "error":
-            err = item.get("error", {})
-            msg = err.get("message", str(item))
-            logging.error(f"Turso SQL error: {msg}")
-            raise RuntimeError(f"Turso error: {msg}")
-        else:
-            logging.warning(f"Turso unexpected result type: {t!r} | item={item}")
-    return results
-
-async def db_one(sql, params=()):
-    """Вернуть одну строку как dict или None."""
-    res = await _turso([{"q": sql, "params": list(params)}])
-    rows = res[0]["rows"] if res else []
-    return rows[0] if rows else None
-
-async def db_all(sql, params=()):
-    """Вернуть все строки как list[dict]."""
-    res = await _turso([{"q": sql, "params": list(params)}])
-    return res[0]["rows"] if res else []
-
-async def db_run(sql, params=()):
-    """Выполнить INSERT/UPDATE/DELETE без возврата данных."""
-    try:
-        await _turso([{"q": sql, "params": list(params)}])
-    except Exception as e:
-        logging.error(f"db_run ERROR: {e} | SQL: {sql[:80]} | params: {params}")
-        raise
-
-async def db_insert(sql, params=()):
-    """Выполнить INSERT и вернуть last_insert_rowid."""
-    try:
-        res = await _turso([{"q": sql, "params": list(params)}])
-    except Exception as e:
-        logging.error(f"db_insert ERROR: {e} | SQL: {sql[:80]}")
-        raise
-    rid = res[0]["last_insert_rowid"] if res else None
-    try:
-        result = int(rid) if rid is not None else None
-        logging.debug(f"db_insert OK: last_insert_rowid={result}")
-        return result
-    except (ValueError, TypeError):
-        logging.error(f"db_insert: cannot parse rowid={rid!r}")
-        return None
-# ══════════════════════════════════════════════
-#  In-memory кэш с TTL (8 секунд)
-#  Снижает нагрузку на Turso в ~10x
-# ══════════════════════════════════════════════
-import time as _time
-
-_CACHE: dict = {}          # key → (value, expires_at)
-CACHE_TTL = 8              # секунд
-
-def _cache_get(key):
-    entry = _CACHE.get(key)
-    if entry and _time.monotonic() < entry[1]:
-        return entry[0], True
-    return None, False
-
-def _cache_set(key, value):
-    _CACHE[key] = (value, _time.monotonic() + CACHE_TTL)
-    return value
-
-def _cache_invalidate(*prefixes):
-    """Удалить все ключи начинающиеся на prefix."""
-    dead = [k for k in _CACHE for p in prefixes if k == p or k.startswith(p + ":")]
-    for k in dead:
-        _CACHE.pop(k, None)
-
-async def cached_db_one(cache_key, sql, params=()):
-    v, hit = _cache_get(cache_key)
-    if hit:
-        return v
-    v = await db_one(sql, params)
-    return _cache_set(cache_key, v)
-
-async def cached_db_all(cache_key, sql, params=()):
-    v, hit = _cache_get(cache_key)
-    if hit:
-        return v
-    v = await db_all(sql, params)
-    return _cache_set(cache_key, v)
-
-
+DB_PATH = "shop.db"
 
 bot     = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
@@ -291,116 +115,156 @@ class ReviewSt(StatesGroup):
     comment = State()
 
 # ══════════════════════════════════════════════
-#  Инициализация базы данных (Turso)
+#  База данных
 # ══════════════════════════════════════════════
 async def init_db():
-    """Создаёт все таблицы если их нет (Turso / libSQL)."""
-    stmts = [
-        {"q": """CREATE TABLE IF NOT EXISTS users (
-            user_id           INTEGER PRIMARY KEY,
-            username          TEXT    DEFAULT '',
-            first_name        TEXT    DEFAULT '',
-            phone             TEXT    DEFAULT '',
-            default_address   TEXT    DEFAULT '',
-            total_purchases   INTEGER DEFAULT 0,
-            total_spent       REAL    DEFAULT 0,
-            bonus_balance     REAL    DEFAULT 0,
-            registered_at     TEXT
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS categories (
-            id   INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS products (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            category_id     INTEGER,
-            name            TEXT    NOT NULL,
-            description     TEXT    DEFAULT '',
-            price           REAL    NOT NULL,
-            sizes           TEXT    DEFAULT '[]',
-            stock           INTEGER DEFAULT 0,
-            seller_username TEXT    DEFAULT '',
-            seller_phone    TEXT    DEFAULT '',
-            card_file_id    TEXT    DEFAULT '',
-            card_media_type TEXT    DEFAULT '',
-            gallery         TEXT    DEFAULT '[]',
-            is_active       INTEGER DEFAULT 1,
-            created_at      TEXT
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS orders (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id     INTEGER,
-            product_id  INTEGER,
-            size        TEXT    DEFAULT '',
-            price       REAL,
-            method      TEXT    DEFAULT 'crypto',
-            phone       TEXT    DEFAULT '',
-            address     TEXT    DEFAULT '',
-            status      TEXT    DEFAULT 'processing',
-            created_at  TEXT
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS purchases (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id      INTEGER,
-            product_id   INTEGER,
-            price        REAL,
-            method       TEXT    DEFAULT 'crypto',
-            purchased_at TEXT
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS media_settings (
-            key        TEXT PRIMARY KEY,
-            media_type TEXT,
-            file_id    TEXT
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS shop_settings (
-            key   TEXT PRIMARY KEY,
-            value TEXT
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS crypto_payments (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id    INTEGER,
-            product_id INTEGER,
-            size       TEXT    DEFAULT '',
-            invoice_id TEXT UNIQUE,
-            amount_kzt REAL,
-            amount_usd REAL,
-            status     TEXT DEFAULT 'pending',
-            created_at TEXT
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS kaspi_payments (
-            id             INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id        INTEGER,
-            product_id     INTEGER,
-            size           TEXT    DEFAULT '',
-            amount         REAL,
-            status         TEXT    DEFAULT 'pending',
-            manager_msg_id INTEGER DEFAULT 0,
-            created_at     TEXT
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS reviews (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id    INTEGER,
-            product_id INTEGER,
-            order_id   INTEGER,
-            rating     INTEGER,
-            comment    TEXT,
-            created_at TEXT
-        )"""},
-        {"q": """CREATE TABLE IF NOT EXISTS ad_requests (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id     INTEGER,
-            description TEXT,
-            method      TEXT    DEFAULT 'crypto',
-            amount      REAL    DEFAULT 500,
-            status      TEXT    DEFAULT 'pending',
-            created_at  TEXT
-        )"""},
-    ]
-    await _turso(stmts)
-    logging.info("✅ БД Turso инициализирована")
+    """
+    Инициализация базы данных.
+    Бот сам создаёт все таблицы при первом запуске.
+    Достаточно создать пустой файл shop.db — остальное сделает этот метод.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        # WAL-режим: надёжнее при параллельных записях
+        await db.execute("PRAGMA journal_mode=WAL")
+        # Внешние ключи
+        await db.execute("PRAGMA foreign_keys=ON")
+        await db.executescript('''
+            CREATE TABLE IF NOT EXISTS users (
+                user_id           INTEGER PRIMARY KEY,
+                username          TEXT    DEFAULT '',
+                first_name        TEXT    DEFAULT '',
+                phone             TEXT    DEFAULT '',
+                default_address   TEXT    DEFAULT '',
+                total_purchases   INTEGER DEFAULT 0,
+                total_spent       REAL    DEFAULT 0,
+                bonus_balance     REAL    DEFAULT 0,
+                registered_at     TEXT
+            );
 
+            CREATE TABLE IF NOT EXISTS categories (
+                id   INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL
+            );
 
+            CREATE TABLE IF NOT EXISTS products (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                category_id     INTEGER,
+                name            TEXT    NOT NULL,
+                description     TEXT    DEFAULT '',
+                price           REAL    NOT NULL,
+                sizes           TEXT    DEFAULT '[]',
+                stock           INTEGER DEFAULT 0,
+                seller_username TEXT    DEFAULT '',
+                seller_phone    TEXT    DEFAULT '',
+                card_file_id    TEXT    DEFAULT '',
+                card_media_type TEXT    DEFAULT '',
+                gallery         TEXT    DEFAULT '[]',
+                is_active       INTEGER DEFAULT 1,
+                created_at      TEXT,
+                FOREIGN KEY (category_id) REFERENCES categories(id)
+            );
 
+            CREATE TABLE IF NOT EXISTS orders (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER,
+                product_id  INTEGER,
+                size        TEXT    DEFAULT '',
+                price       REAL,
+                method      TEXT    DEFAULT 'crypto',
+                phone       TEXT    DEFAULT '',
+                address     TEXT    DEFAULT '',
+                status      TEXT    DEFAULT 'processing',
+                created_at  TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS purchases (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id      INTEGER,
+                product_id   INTEGER,
+                price        REAL,
+                method       TEXT    DEFAULT 'crypto',
+                purchased_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS media_settings (
+                key        TEXT PRIMARY KEY,
+                media_type TEXT,
+                file_id    TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS shop_settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS crypto_payments (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    INTEGER,
+                product_id INTEGER,
+                size       TEXT    DEFAULT '',
+                invoice_id TEXT UNIQUE,
+                amount_kzt REAL,
+                amount_usd REAL,
+                status     TEXT DEFAULT 'pending',
+                created_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS kaspi_payments (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id        INTEGER,
+                product_id     INTEGER,
+                size           TEXT    DEFAULT '',
+                amount         REAL,
+                status         TEXT    DEFAULT 'pending',
+                manager_msg_id INTEGER DEFAULT 0,
+                created_at     TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS reviews (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    INTEGER,
+                product_id INTEGER,
+                order_id   INTEGER,
+                rating     INTEGER,
+                comment    TEXT,
+                created_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS ad_requests (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER,
+                description TEXT,
+                method      TEXT    DEFAULT 'crypto',
+                amount      REAL    DEFAULT 500,
+                status      TEXT    DEFAULT 'pending',
+                created_at  TEXT
+            );
+        ''')
+        await db.commit()
+
+# ── Универсальные хелперы ──────────────────────
+async def db_one(sql, params=()):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(sql, params) as c:
+            return await c.fetchone()
+
+async def db_all(sql, params=()):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(sql, params) as c:
+            return await c.fetchall()
+
+async def db_run(sql, params=()):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(sql, params)
+        await db.commit()
+
+async def db_insert(sql, params=()):
+    async with aiosqlite.connect(DB_PATH) as db:
+        c = await db.execute(sql, params)
+        await db.commit()
+        return c.lastrowid
 
 # ── Пользователи ───────────────────────────────
 async def ensure_user(u: types.User):
@@ -410,18 +274,15 @@ async def ensure_user(u: types.User):
            VALUES (?, ?, ?, ?)''',
         (u.id, u.username or '', u.first_name or '', datetime.now().isoformat())
     )
-    _cache_invalidate(f"user:{u.id}")
 
 async def get_user(uid):
-    return await cached_db_one(f"user:{uid}", 'SELECT * FROM users WHERE user_id=?', (uid,))
+    return await db_one('SELECT * FROM users WHERE user_id=?', (uid,))
 
 async def update_user_phone(uid, phone: str):
     await db_run('UPDATE users SET phone=? WHERE user_id=?', (phone, uid))
-    _cache_invalidate(f"user:{uid}")
 
 async def update_user_address(uid, address: str):
     await db_run('UPDATE users SET default_address=? WHERE user_id=?', (address, uid))
-    _cache_invalidate(f"user:{uid}")
 
 async def add_bonus(uid, amount_kzt: float) -> float:
     bonus = round(amount_kzt * CASHBACK_PERCENT / 100, 0)
@@ -429,59 +290,50 @@ async def add_bonus(uid, amount_kzt: float) -> float:
         'UPDATE users SET bonus_balance=bonus_balance+? WHERE user_id=?',
         (bonus, uid)
     )
-    _cache_invalidate(f"user:{uid}")
     return bonus
 
 # ── Категории ──────────────────────────────────
 async def get_categories():
-    return await cached_db_all("categories", 'SELECT * FROM categories ORDER BY id')
+    return await db_all('SELECT * FROM categories ORDER BY id')
 
 async def add_category(name: str):
     await db_run('INSERT INTO categories(name) VALUES(?)', (name,))
-    _cache_invalidate("categories")
 
 async def del_category(cid: int):
     await db_run('UPDATE products SET is_active=0 WHERE category_id=?', (cid,))
     await db_run('DELETE FROM categories WHERE id=?', (cid,))
-    _cache_invalidate("categories", "products")
 
 # ── Товары ─────────────────────────────────────
 async def get_products(cid: int):
-    return await cached_db_all(
-        f"products:{cid}", 'SELECT * FROM products WHERE category_id=? AND is_active=1', (cid,)
+    return await db_all(
+        'SELECT * FROM products WHERE category_id=? AND is_active=1', (cid,)
     )
 
 async def get_product(pid: int):
-    return await cached_db_one(f"product:{pid}", 'SELECT * FROM products WHERE id=?', (pid,))
+    return await db_one('SELECT * FROM products WHERE id=?', (pid,))
 
 async def add_product(cid, name, desc, price, sizes_list,
                       stock, seller_username='', seller_phone='',
                       card_file_id='', card_media_type='', gallery=None):
     sizes_json   = json.dumps(sizes_list, ensure_ascii=False)
     gallery_json = json.dumps(gallery or [], ensure_ascii=False)
-    pid = await db_insert(
+    await db_run(
         '''INSERT INTO products
            (category_id, name, description, price, sizes, stock,
             seller_username, seller_phone,
-            card_file_id, card_media_type, gallery, is_active, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)''',
+            card_file_id, card_media_type, gallery, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (cid, name, desc, price, sizes_json, stock,
          seller_username, seller_phone,
          card_file_id, card_media_type, gallery_json,
          datetime.now().isoformat())
     )
-    # Сбрасываем кэш каталога чтобы товар сразу появился
-    _cache_invalidate("products")
-    _cache_invalidate("categories")
-    return pid
 
 async def del_product(pid: int):
     await db_run('UPDATE products SET is_active=0 WHERE id=?', (pid,))
-    _cache_invalidate("products", f"product:{pid}")
 
 async def reduce_stock(pid: int):
     await db_run('UPDATE products SET stock=MAX(0, stock-1) WHERE id=?', (pid,))
-    _cache_invalidate(f"product:{pid}")
 
 def parse_sizes(product) -> list:
     try:
@@ -522,7 +374,6 @@ async def add_purchase(uid, pid, price, method='crypto'):
         'UPDATE users SET total_purchases=total_purchases+1, total_spent=total_spent+? WHERE user_id=?',
         (price, uid)
     )
-    _cache_invalidate(f"user:{uid}")
 
 # ── Отзывы ─────────────────────────────────────
 async def add_review(uid, pid, oid, rating, comment):
@@ -558,17 +409,15 @@ async def set_media(key, mtype, fid):
         'INSERT OR REPLACE INTO media_settings(key,media_type,file_id) VALUES(?,?,?)',
         (key, mtype, fid)
     )
-    _cache_invalidate(f"media:{key}")
 
 async def get_media(key):
-    return await cached_db_one(f"media:{key}", 'SELECT * FROM media_settings WHERE key=?', (key,))
+    return await db_one('SELECT * FROM media_settings WHERE key=?', (key,))
 
 async def set_setting(k, v):
     await db_run('INSERT OR REPLACE INTO shop_settings(key,value) VALUES(?,?)', (k, v))
-    _cache_invalidate(f"setting:{k}")
 
 async def get_setting(k, default=''):
-    r = await cached_db_one(f"setting:{k}", 'SELECT value FROM shop_settings WHERE key=?', (k,))
+    r = await db_one('SELECT value FROM shop_settings WHERE key=?', (k,))
     return r['value'] if r else default
 
 async def get_stats():
@@ -913,11 +762,6 @@ def _profile_kb() -> InlineKeyboardMarkup:
     ])
 
 async def _send_profile(tg_user: types.User, user, send_fn=None, edit_msg=None):
-    if user is None:
-        # Запасной вариант — пользователь ещё не в БД
-        if send_fn:
-            await send_fn("⏳ Профиль создаётся, попробуйте снова.", parse_mode="HTML")
-        return
     text = _profile_text(tg_user, user)
     kb   = _profile_kb()
     if edit_msg:
@@ -1372,7 +1216,6 @@ async def _show_payment_confirm(cb: types.CallbackQuery, pid: int, size: str):
     if not p:
         await cb.answer("Товар не найден", show_alert=True)
         return
-    await ensure_user(cb.from_user)
     user = await get_user(cb.from_user.id)
 
     rate    = await get_usd_kzt_rate()
@@ -2198,11 +2041,7 @@ async def cb_ad_approve(cb: types.CallbackQuery):
     if cb.from_user.id != MANAGER_ID and cb.from_user.id not in ADMIN_IDS:
         await cb.answer("Нет доступа", show_alert=True)
         return
-    parts = cb.data.split("_")
-    if len(parts) < 3 or parts[2] in (None, "None", ""):
-        await cb.answer("Ошибка: ID заявки не найден", show_alert=True)
-        return
-    aid = int(parts[2])
+    aid = int(cb.data.split("_")[2])
     ar  = await get_ad_request(aid)
     if not ar:
         await cb.answer("Заявка не найдена", show_alert=True)
@@ -2235,11 +2074,7 @@ async def cb_ad_reject(cb: types.CallbackQuery):
     if cb.from_user.id != MANAGER_ID and cb.from_user.id not in ADMIN_IDS:
         await cb.answer("Нет доступа", show_alert=True)
         return
-    parts = cb.data.split("_")
-    if len(parts) < 3 or parts[2] in (None, "None", ""):
-        await cb.answer("Ошибка: ID заявки не найден", show_alert=True)
-        return
-    aid = int(parts[2])
+    aid = int(cb.data.split("_")[2])
     ar  = await get_ad_request(aid)
     if not ar or ar['status'] != 'pending':
         await cb.answer("Заявка уже обработана", show_alert=True)
@@ -3053,8 +2888,6 @@ async def nav_clear_state(cb: types.CallbackQuery, state: FSMContext):
 #  Main
 # ══════════════════════════════════════════════
 async def main():
-    global _http_session
-    _http_session = aiohttp.ClientSession()
     await init_db()
     logging.basicConfig(level=logging.INFO)
     print("\033[35m" + "═" * 46)
@@ -3063,11 +2896,7 @@ async def main():
     print(f"  💱 Курс USD/KZT: {USD_KZT_RATE} (фикс.)")
     print(f"  🎁 Кэшбэк: {CASHBACK_PERCENT}%")
     print("🚀 Бот запущен!")
-    try:
-        await dp.start_polling(bot)
-    finally:
-        if _http_session and not _http_session.closed:
-            await _http_session.close()
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
