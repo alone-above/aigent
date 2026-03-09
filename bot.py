@@ -197,7 +197,8 @@ async def init_db():
             total_purchases INTEGER DEFAULT 0,
             total_spent     REAL DEFAULT 0,
             bonus_balance   REAL DEFAULT 0,
-            registered_at   TEXT
+            registered_at   TEXT,
+            agreed_terms    INTEGER DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS categories (
             id   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -315,6 +316,13 @@ async def init_db():
             UNIQUE(user_id, promo_id)
         );
         """)
+        # Migration: add agreed_terms if missing
+        try:
+            await db.execute(
+                'ALTER TABLE users ADD COLUMN agreed_terms INTEGER DEFAULT 0')
+            await db.commit()
+        except Exception:
+            pass
         await db.commit()
     logging.info('✅ БД инициализирована')
 
@@ -335,6 +343,14 @@ async def ensure_user(u: types.User):
 async def get_user(uid):
     return await cached_db_one(f"user:{uid}",
                                'SELECT * FROM users WHERE user_id=?', (uid,))
+
+async def set_agreed_terms(uid: int):
+    await db_run('UPDATE users SET agreed_terms=1 WHERE user_id=?', (uid,))
+    _cache_invalidate(f"user:{uid}")
+
+async def has_agreed_terms(uid: int) -> bool:
+    u = await get_user(uid)
+    return bool(u and u.get('agreed_terms', 0))
 
 async def update_user_phone(uid, phone: str):
     await db_run('UPDATE users SET phone=? WHERE user_id=?', (phone, uid))
@@ -831,6 +847,11 @@ async def cmd_start(msg: types.Message, state: FSMContext):
         await _show_support(msg.chat.id)
         return
 
+    # Show agreement for new users who haven't agreed yet
+    if not await has_agreed_terms(msg.from_user.id):
+        await _show_agreement(msg.chat.id)
+        return
+
     text = (
         f"{ae('shop')} <b>{SHOP_NAME}</b>\n\n"
         f"<blockquote>{ae('down')} Добро пожаловать! "
@@ -863,20 +884,113 @@ async def cb_main(cb: types.CallbackQuery, state: FSMContext):
     await cb.answer()
 
 # ══════════════════════════════════════════════
+#  Соглашение — показывается новым пользователям
+# ══════════════════════════════════════════════
+async def _show_agreement(chat_id: int):
+    text = (
+        f"👋 <b>Добро пожаловать в {SHOP_NAME}!</b>\n\n"
+        f"<blockquote>Перед тем как начать, пожалуйста, ознакомьтесь "
+        f"с нашими документами и подтвердите своё согласие:\n\n"
+        f"📄 <b>Публичная оферта</b>\n"
+        f"📋 <b>Политика конфиденциальности</b>\n"
+        f"📝 <b>Пользовательское соглашение</b>\n\n"
+        f"Нажимая кнопку <b>«Принять и продолжить»</b>, вы подтверждаете, "
+        f"что ознакомились с документами и согласны с их условиями.</blockquote>"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📄 Публичная оферта",
+                              url="https://teletype.in/@aloneabove/R6n3kZPT77z")],
+        [InlineKeyboardButton(text="🔒 Политика конфиденциальности",
+                              url="https://teletype.in/@aloneabove/cC0sM1BcefC")],
+        [InlineKeyboardButton(text="📝 Пользовательское соглашение",
+                              url="https://teletype.in/@aloneabove/L8aD4zXVy6W")],
+        [InlineKeyboardButton(text="✅ Принять и продолжить",
+                              callback_data="agree_terms")],
+    ])
+    await bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
+
+@router.callback_query(F.data == "agree_terms")
+async def cb_agree_terms(cb: types.CallbackQuery):
+    await ensure_user(cb.from_user)
+    await set_agreed_terms(cb.from_user.id)
+    await set_cmds(cb.from_user.id)
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+    text = (
+        f"{ae('shop')} <b>{SHOP_NAME}</b>\n\n"
+        f"<blockquote>✅ Спасибо! Вы приняли условия.\n\n"
+        f"{ae('down')} Выберите раздел:</blockquote>"
+    )
+    await send_media(cb.from_user.id, text, "main_menu", kb_main())
+    await cb.answer("✅ Добро пожаловать!")
+
+# ══════════════════════════════════════════════
 #  Поддержка — отдельная функция для deep link
 # ══════════════════════════════════════════════
 async def _show_support(chat_id: int):
     text = (
         f"{ae('support')} <b>Поддержка</b>\n\n"
-        f"<blockquote>По любым вопросам пишите менеджеру:\n"
-        f"{SUPPORT_USERNAME}</blockquote>"
+        f"<blockquote>По любым вопросам пишите нашему менеджеру или "
+        f"в службу поддержки.</blockquote>"
     )
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="✉️ Написать",
-            url=f"https://t.me/{SUPPORT_USERNAME.lstrip('@')}")
-    ]])
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="✉️ Написать в поддержку",
+            url=f"https://t.me/{SUPPORT_USERNAME.lstrip('@')}")],
+        [InlineKeyboardButton(text="📞 Контакты",
+                              callback_data="support_contacts")],
+        [InlineKeyboardButton(text="📄 Публичная оферта",
+                              url="https://teletype.in/@aloneabove/R6n3kZPT77z")],
+        [InlineKeyboardButton(text="🔒 Политика конфиденциальности",
+                              url="https://teletype.in/@aloneabove/cC0sM1BcefC")],
+        [InlineKeyboardButton(text="📝 Пользовательское соглашение",
+                              url="https://teletype.in/@aloneabove/L8aD4zXVy6W")],
+        [InlineKeyboardButton(text="🌐 Наш сайт / магазин",
+                              url="https://t.me/alone_above_bot/shop")],
+    ])
     await send_media(chat_id, text, "support_menu", kb)
+
+@router.callback_query(F.data == "support_contacts")
+async def cb_support_contacts(cb: types.CallbackQuery):
+    text = (
+        f"📞 <b>Контакты</b>\n\n"
+        f"<blockquote>"
+        f"📱 <b>Номер телефона:</b> <a href='tel:+77078115621'>+7 707 811 5621</a>\n"
+        f"🌍 <b>Страна деятельности:</b> Казахстан\n\n"
+        f"🛍 <b>Telegram Магазина:</b> @aloneaboveshop\n"
+        f"👤 <b>Telegram Владельца:</b> @AloneAbove\n"
+        f"🤝 <b>Telegram Менеджера:</b> @AloneAboveManager\n"
+        f"❓ <b>Telegram Поддержки:</b> @AloneAboveSupport\n\n"
+        f"👑 <b>Владелец сервиса:</b> Кахраман Айбек\n"
+        f"📧 <b>Контактный Email:</b> Alone.Above.0000@gmail.com\n"
+        f"🌐 <b>Сайт:</b> <a href='https://t.me/alone_above_bot/shop'>t.me/alone_above_bot/shop</a>"
+        f"</blockquote>"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✉️ Написать менеджеру",
+                              url="https://t.me/AloneAboveManager")],
+        [InlineKeyboardButton(text="🆘 Написать в поддержку",
+                              url="https://t.me/AloneAboveSupport")],
+        [InlineKeyboardButton(text="‹ Назад", callback_data="support_back")],
+    ])
+    try:
+        await cb.message.edit_text(text, parse_mode="HTML",
+                                   reply_markup=kb, disable_web_page_preview=True)
+    except Exception:
+        await cb.message.answer(text, parse_mode="HTML",
+                                reply_markup=kb, disable_web_page_preview=True)
+    await cb.answer()
+
+@router.callback_query(F.data == "support_back")
+async def cb_support_back(cb: types.CallbackQuery):
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+    await _show_support(cb.from_user.id)
+    await cb.answer()
 
 # ══════════════════════════════════════════════
 #  Reply-кнопки главного меню
@@ -3800,7 +3914,7 @@ NAV_CALLBACKS = {
     "adm_panel", "adm_media", "adm_cats",
     "adm_products", "addprod", "adm_settings",
     "ad_warning", "partnership", "about_back",
-    "adm_promos",
+    "adm_promos", "support_back", "support_contacts",
 }
 
 @router.callback_query(F.data.in_(NAV_CALLBACKS))
