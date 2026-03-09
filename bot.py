@@ -634,18 +634,41 @@ async def send_media(chat_id: int, text: str, key: str, markup=None):
     m = await get_media(key)
     if m:
         mt = m["media_type"]
+        fid = m["file_id"]
         try:
             if mt == "photo":
-                await bot.send_photo(chat_id, m["file_id"], caption=text,
+                await bot.send_photo(chat_id, fid, caption=text,
                                      parse_mode="HTML", reply_markup=markup)
                 return
             elif mt == "video":
-                await bot.send_video(chat_id, m["file_id"], caption=text,
+                await bot.send_video(chat_id, fid, caption=text,
                                      parse_mode="HTML", reply_markup=markup)
                 return
             elif mt == "animation":
-                await bot.send_animation(chat_id, m["file_id"], caption=text,
+                await bot.send_animation(chat_id, fid, caption=text,
                                          parse_mode="HTML", reply_markup=markup)
+                return
+            elif mt == "document":
+                await bot.send_document(chat_id, fid, caption=text,
+                                        parse_mode="HTML", reply_markup=markup)
+                return
+            elif mt == "audio":
+                await bot.send_audio(chat_id, fid, caption=text,
+                                     parse_mode="HTML", reply_markup=markup)
+                return
+            elif mt == "voice":
+                await bot.send_voice(chat_id, fid, caption=text,
+                                     parse_mode="HTML", reply_markup=markup)
+                return
+            elif mt == "video_note":
+                await bot.send_video_note(chat_id, fid, reply_markup=markup)
+                if text:
+                    await bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
+                return
+            elif mt == "sticker":
+                await bot.send_sticker(chat_id, fid, reply_markup=markup)
+                if text:
+                    await bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
                 return
         except Exception:
             # Медиа недействительно — убираем из БД
@@ -1120,6 +1143,12 @@ async def cb_prod(cb: types.CallbackQuery):
             elif card_mt == 'video':
                 await bot.send_video(cb.from_user.id, card_fid,
                                      caption=text, parse_mode="HTML", reply_markup=markup)
+            elif card_mt == 'animation':
+                await bot.send_animation(cb.from_user.id, card_fid,
+                                         caption=text, parse_mode="HTML", reply_markup=markup)
+            elif card_mt == 'document':
+                await bot.send_document(cb.from_user.id, card_fid,
+                                        caption=text, parse_mode="HTML", reply_markup=markup)
             await cb.answer()
             return
         except Exception:
@@ -2312,7 +2341,9 @@ async def cb_delmedia(cb: types.CallbackQuery, state: FSMContext):
 
 @router.message(AdminSt.set_media_file,
                 F.content_type.in_([ContentType.PHOTO, ContentType.VIDEO,
-                                    ContentType.ANIMATION]))
+                                    ContentType.ANIMATION, ContentType.DOCUMENT,
+                                    ContentType.AUDIO, ContentType.VOICE,
+                                    ContentType.VIDEO_NOTE, ContentType.STICKER]))
 async def proc_media_file(msg: types.Message, state: FSMContext):
     d   = await state.get_data()
     key = d.get("media_key")
@@ -2322,6 +2353,16 @@ async def proc_media_file(msg: types.Message, state: FSMContext):
         fid, mt = msg.video.file_id, "video"
     elif msg.animation:
         fid, mt = msg.animation.file_id, "animation"
+    elif msg.document:
+        fid, mt = msg.document.file_id, "document"
+    elif msg.audio:
+        fid, mt = msg.audio.file_id, "audio"
+    elif msg.voice:
+        fid, mt = msg.voice.file_id, "voice"
+    elif msg.video_note:
+        fid, mt = msg.video_note.file_id, "video_note"
+    elif msg.sticker:
+        fid, mt = msg.sticker.file_id, "sticker"
     else:
         await msg.answer("❌ Неподдерживаемый формат", reply_markup=kb_admin_back())
         return
@@ -2367,7 +2408,20 @@ async def proc_broadcast(msg: types.Message, state: FSMContext):
             elif msg.animation:
                 await bot.send_animation(uid, msg.animation.file_id,
                                          caption=msg.caption, parse_mode="HTML")
-            else:
+            elif msg.document:
+                await bot.send_document(uid, msg.document.file_id,
+                                        caption=msg.caption, parse_mode="HTML")
+            elif msg.audio:
+                await bot.send_audio(uid, msg.audio.file_id,
+                                     caption=msg.caption, parse_mode="HTML")
+            elif msg.voice:
+                await bot.send_voice(uid, msg.voice.file_id,
+                                     caption=msg.caption, parse_mode="HTML")
+            elif msg.video_note:
+                await bot.send_video_note(uid, msg.video_note.file_id)
+            elif msg.sticker:
+                await bot.send_sticker(uid, msg.sticker.file_id)
+            elif msg.text:
                 await bot.send_message(uid, msg.text, parse_mode="HTML")
             ok += 1
         except Exception:
@@ -2713,12 +2767,22 @@ async def proc_prod_seller_un(msg: types.Message, state: FSMContext):
     )
 
 @router.message(AdminSt.add_prod_card,
-                F.content_type.in_([ContentType.PHOTO, ContentType.VIDEO]))
+                F.content_type.in_([ContentType.PHOTO, ContentType.VIDEO,
+                                    ContentType.ANIMATION, ContentType.DOCUMENT]))
 async def proc_prod_card_media(msg: types.Message, state: FSMContext):
     if msg.photo:
         fid, mt = msg.photo[-1].file_id, 'photo'
-    else:
+    elif msg.video:
         fid, mt = msg.video.file_id, 'video'
+    elif msg.animation:
+        fid, mt = msg.animation.file_id, 'animation'
+    elif msg.document:
+        fid, mt = msg.document.file_id, 'document'
+    else:
+        fid, mt = '', ''
+    if not fid:
+        await msg.answer('❌ Неподдерживаемый формат', parse_mode='HTML')
+        return
     await state.update_data(card_fid=fid, card_mt=mt)
     await state.set_state(AdminSt.add_prod_gallery)
     await msg.answer(
