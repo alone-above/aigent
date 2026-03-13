@@ -164,6 +164,7 @@ class AdminSt(StatesGroup):
     broadcast          = State()
     set_media_file     = State()
     add_cat_name       = State()
+    add_cat_parent     = State()
     add_prod_name      = State()
     add_prod_desc      = State()
     add_prod_price     = State()
@@ -173,6 +174,14 @@ class AdminSt(StatesGroup):
     add_prod_seller_un = State()
     add_prod_card      = State()
     add_prod_gallery   = State()
+    add_drop_cat       = State()
+    add_drop_name      = State()
+    add_drop_desc      = State()
+    add_drop_price     = State()
+    add_drop_sizes     = State()
+    add_drop_stock     = State()
+    add_drop_start_at  = State()
+    add_drop_card      = State()
     edit_shop_info     = State()
     set_custom_status  = State()
     # Промокоды
@@ -188,6 +197,17 @@ class AdminSt(StatesGroup):
     # Редактирование товара
     edit_prod_field    = State()
     edit_prod_value    = State()
+    # Роли
+    role_user_id       = State()
+    # Партнёрская программа (настройка от имени админа)
+    partner_bonus_new  = State()
+    partner_bonus_rep  = State()
+    # Редактирование сообщений бота
+    bot_msg_key        = State()
+    bot_msg_text       = State()
+    # Подкатегория
+    subcat_parent      = State()
+    subcat_name        = State()
 
 class AdSt(StatesGroup):
     description = State()
@@ -206,6 +226,14 @@ class PromoApplySt(StatesGroup):
 class ComplaintSt(StatesGroup):
     order_id    = State()
     description = State()
+
+class PartnerSt(StatesGroup):
+    choose_ref   = State()
+    custom_ref   = State()
+    bonus_type   = State()
+
+class OrderNoteSt(StatesGroup):
+    entering = State()
 
 # ══════════════════════════════════════════════
 #  Инициализация PostgreSQL
@@ -357,10 +385,72 @@ async def init_db():
             data       TEXT DEFAULT '',
             created_at TEXT
         );
+        CREATE TABLE IF NOT EXISTS user_roles (
+            user_id    BIGINT PRIMARY KEY,
+            role       TEXT DEFAULT 'buyer',
+            granted_by BIGINT DEFAULT 0,
+            granted_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS partners (
+            user_id       BIGINT PRIMARY KEY,
+            ref_code      TEXT UNIQUE NOT NULL,
+            bonus_new     TEXT DEFAULT '{"type":"percent","value":5}',
+            bonus_repeat  TEXT DEFAULT '{"type":"percent","value":3}',
+            total_invited INTEGER DEFAULT 0,
+            total_earned  REAL DEFAULT 0,
+            created_at    TEXT
+        );
+        CREATE TABLE IF NOT EXISTS partner_referrals (
+            id           SERIAL PRIMARY KEY,
+            partner_id   BIGINT,
+            referred_uid BIGINT,
+            is_new_buyer INTEGER DEFAULT 1,
+            bonus_amount REAL DEFAULT 0,
+            order_id     INTEGER DEFAULT 0,
+            created_at   TEXT
+        );
+        CREATE TABLE IF NOT EXISTS order_history (
+            id         SERIAL PRIMARY KEY,
+            order_id   INTEGER,
+            status     TEXT,
+            changed_by BIGINT DEFAULT 0,
+            created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS order_notes (
+            id         SERIAL PRIMARY KEY,
+            order_id   INTEGER UNIQUE,
+            note       TEXT,
+            created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS drops (
+            id          SERIAL PRIMARY KEY,
+            category_id INTEGER,
+            name        TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            price       REAL NOT NULL,
+            sizes       TEXT DEFAULT '[]',
+            stock       INTEGER DEFAULT 0,
+            start_at    TEXT NOT NULL,
+            card_file_id TEXT DEFAULT '',
+            card_media_type TEXT DEFAULT '',
+            gallery     TEXT DEFAULT '[]',
+            is_active   INTEGER DEFAULT 1,
+            created_at  TEXT
+        );
+        CREATE TABLE IF NOT EXISTS bot_messages (
+            key        TEXT PRIMARY KEY,
+            text       TEXT,
+            media_type TEXT DEFAULT '',
+            file_id    TEXT DEFAULT ''
+        );
         """)
         # Миграции — добавить колонки если нет
         for col_sql in [
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_code TEXT DEFAULT ''",
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS short_id TEXT DEFAULT ''",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS note TEXT DEFAULT ''",
+            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS parent_id INTEGER DEFAULT 0",
         ]:
             try:
                 await conn.execute(col_sql)
@@ -440,21 +530,42 @@ async def get_all_users(limit=50, offset=0):
 # ══════════════════════════════════════════════
 #  Категории
 # ══════════════════════════════════════════════
-async def get_categories():
-    return await cached_db_all("categories", 'SELECT * FROM categories ORDER BY id')
+async def get_categories(parent_id: int = 0):
+    return await cached_db_all(
+        f"categories:p{parent_id}",
+        'SELECT * FROM categories WHERE parent_id=$1 ORDER BY id',
+        (parent_id,)
+    )
 
-async def add_category(name: str):
-    await db_run('INSERT INTO categories(name) VALUES($1)', (name,))
+async def get_all_categories():
+    return await cached_db_all("categories:all", 'SELECT * FROM categories ORDER BY id')
+
+async def get_category(cid: int):
+    return await db_one('SELECT * FROM categories WHERE id=$1', (cid,))
+
+async def add_category(name: str, parent_id: int = 0):
+    await db_run('INSERT INTO categories(name, parent_id) VALUES($1, $2)', (name, parent_id))
     _cache_invalidate("categories")
 
 async def del_category(cid: int):
     await db_run('UPDATE products SET is_active=0 WHERE category_id=$1', (cid,))
+    # Also delete subcategories
+    subcats = await db_all('SELECT id FROM categories WHERE parent_id=$1', (cid,))
+    for sc in subcats:
+        await db_run('UPDATE products SET is_active=0 WHERE category_id=$1', (sc['id'],))
+        await db_run('DELETE FROM categories WHERE id=$1', (sc['id'],))
     await db_run('DELETE FROM categories WHERE id=$1', (cid,))
     _cache_invalidate("categories", "products")
 
 # ══════════════════════════════════════════════
 #  Товары
 # ══════════════════════════════════════════════
+import random
+import string
+
+def gen_short_id() -> str:
+    return ''.join(random.choices(string.digits, k=5))
+
 async def get_products(cid: int):
     return await cached_db_all(
         f"products:{cid}",
@@ -470,17 +581,18 @@ async def add_product(cid, name, desc, price, sizes_list,
                       card_file_id='', card_media_type='', gallery=None):
     sizes_json   = json.dumps(sizes_list, ensure_ascii=False)
     gallery_json = json.dumps(gallery or [], ensure_ascii=False)
+    short_id = gen_short_id()
     pid = await db_insert(
         '''INSERT INTO products
            (category_id, name, description, price, sizes, stock,
             seller_username, seller_phone,
-            card_file_id, card_media_type, gallery, is_active, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1,$12)
+            card_file_id, card_media_type, gallery, is_active, short_id, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1,$12,$13)
            RETURNING id''',
         (cid, name, desc, price, sizes_json, stock,
          seller_username, seller_phone,
          card_file_id, card_media_type, gallery_json,
-         datetime.now().isoformat())
+         short_id, datetime.now().isoformat())
     )
     _cache_invalidate("products", "categories")
     return pid
@@ -513,7 +625,7 @@ def parse_sizes(product) -> list:
 # ══════════════════════════════════════════════
 async def create_order(uid, username, first_name, pid, size, price,
                        method, phone='', address='', promo_code='', discount=0):
-    return await db_insert(
+    oid = await db_insert(
         '''INSERT INTO orders
            (user_id, username, first_name, product_id, size, price,
             method, phone, address, promo_code, discount, status, created_at)
@@ -523,12 +635,23 @@ async def create_order(uid, username, first_name, pid, size, price,
          method, phone, address, promo_code, discount,
          datetime.now().isoformat())
     )
+    # Log initial status
+    if oid:
+        await db_run(
+            'INSERT INTO order_history(order_id, status, changed_by, created_at) VALUES($1,$2,$3,$4)',
+            (oid, 'processing', uid, datetime.now().isoformat())
+        )
+    return oid
 
 async def get_order(oid: int):
     return await db_one('SELECT * FROM orders WHERE id=$1', (oid,))
 
-async def set_order_status(oid: int, status: str):
+async def set_order_status(oid: int, status: str, changed_by: int = 0):
     await db_run('UPDATE orders SET status=$1 WHERE id=$2', (status, oid))
+    await db_run(
+        'INSERT INTO order_history(order_id, status, changed_by, created_at) VALUES($1,$2,$3,$4)',
+        (oid, status, changed_by, datetime.now().isoformat())
+    )
 
 async def get_user_orders(uid: int):
     return await db_all(
@@ -537,6 +660,201 @@ async def get_user_orders(uid: int):
            WHERE o.user_id=$1 ORDER BY o.created_at DESC LIMIT 10''',
         (uid,)
     )
+
+async def get_order_history(oid: int):
+    return await db_all(
+        'SELECT * FROM order_history WHERE order_id=$1 ORDER BY created_at ASC',
+        (oid,)
+    )
+
+async def set_order_note(oid: int, note: str):
+    await db_run(
+        '''INSERT INTO order_notes(order_id, note, created_at) VALUES($1,$2,$3)
+           ON CONFLICT(order_id) DO UPDATE SET note=$2''',
+        (oid, note, datetime.now().isoformat())
+    )
+
+async def get_order_note(oid: int):
+    r = await db_one('SELECT note FROM order_notes WHERE order_id=$1', (oid,))
+    return r['note'] if r else ''
+
+# ══════════════════════════════════════════════
+#  Роли пользователей
+# ══════════════════════════════════════════════
+ROLES = {
+    'buyer':   '🛒 Покупатель',
+    'seller':  '🏪 Продавец',
+    'owner':   '👑 Владелец',
+    'manager': '🗂 Менеджер',
+    'partner': '🤝 Партнёр',
+    'support': '🎧 Поддержка',
+}
+
+async def get_user_role(uid: int) -> str:
+    if uid in ADMIN_IDS:
+        return 'owner'
+    r = await db_one('SELECT role FROM user_roles WHERE user_id=$1', (uid,))
+    return r['role'] if r else 'buyer'
+
+async def set_user_role(uid: int, role: str, granted_by: int = 0):
+    await db_run(
+        '''INSERT INTO user_roles(user_id, role, granted_by, granted_at)
+           VALUES($1,$2,$3,$4)
+           ON CONFLICT(user_id) DO UPDATE SET role=$2, granted_by=$3, granted_at=$4''',
+        (uid, role, granted_by, datetime.now().isoformat())
+    )
+    _cache_invalidate(f"user:{uid}")
+
+async def get_users_by_role(role: str):
+    return await db_all(
+        '''SELECT u.*, ur.role FROM users u
+           JOIN user_roles ur ON u.user_id=ur.user_id
+           WHERE ur.role=$1 ORDER BY ur.granted_at DESC''',
+        (role,)
+    )
+
+# ══════════════════════════════════════════════
+#  Партнёрская программа
+# ══════════════════════════════════════════════
+async def get_partner(uid: int):
+    return await db_one('SELECT * FROM partners WHERE user_id=$1', (uid,))
+
+async def create_partner(uid: int, ref_code: str):
+    existing = await db_one('SELECT user_id FROM partners WHERE ref_code=$1', (ref_code,))
+    if existing:
+        return False
+    await db_run(
+        '''INSERT INTO partners(user_id, ref_code, created_at) VALUES($1,$2,$3)
+           ON CONFLICT(user_id) DO NOTHING''',
+        (uid, ref_code.upper(), datetime.now().isoformat())
+    )
+    await set_user_role(uid, 'partner')
+    return True
+
+async def update_partner_bonuses(uid: int, bonus_new: dict, bonus_repeat: dict):
+    await db_run(
+        'UPDATE partners SET bonus_new=$1, bonus_repeat=$2 WHERE user_id=$3',
+        (json.dumps(bonus_new), json.dumps(bonus_repeat), uid)
+    )
+
+async def get_partner_by_ref(ref_code: str):
+    return await db_one('SELECT * FROM partners WHERE ref_code=$1', (ref_code.upper(),))
+
+async def record_partner_referral(partner_id: int, referred_uid: int,
+                                  is_new: bool, bonus: float, order_id: int = 0):
+    await db_run(
+        '''INSERT INTO partner_referrals(partner_id, referred_uid, is_new_buyer, bonus_amount, order_id, created_at)
+           VALUES($1,$2,$3,$4,$5,$6)''',
+        (partner_id, referred_uid, 1 if is_new else 0, bonus, order_id,
+         datetime.now().isoformat())
+    )
+    await db_run(
+        'UPDATE partners SET total_invited=total_invited+1, total_earned=total_earned+$1 WHERE user_id=$2',
+        (bonus, partner_id)
+    )
+    await db_run(
+        'UPDATE users SET bonus_balance=bonus_balance+$1 WHERE user_id=$2',
+        (bonus, partner_id)
+    )
+    _cache_invalidate(f"user:{partner_id}")
+
+async def get_partner_referrals(partner_id: int, limit=20):
+    return await db_all(
+        '''SELECT pr.*, u.username, u.first_name
+           FROM partner_referrals pr LEFT JOIN users u ON pr.referred_uid=u.user_id
+           WHERE pr.partner_id=$1 ORDER BY pr.created_at DESC LIMIT $2''',
+        (partner_id, limit)
+    )
+
+def calc_partner_bonus(price: float, bonus_cfg: dict) -> float:
+    btype = bonus_cfg.get('type', 'percent')
+    val   = float(bonus_cfg.get('value', 0))
+    if btype == 'percent':
+        return round(price * val / 100, 0)
+    elif btype == 'fixed':
+        return round(val, 0)
+    return 0.0
+
+# ══════════════════════════════════════════════
+#  Дропы
+# ══════════════════════════════════════════════
+async def get_active_drops():
+    now = datetime.now().isoformat()
+    return await db_all(
+        "SELECT * FROM drops WHERE is_active=1 AND start_at <= $1 ORDER BY start_at DESC",
+        (now,)
+    )
+
+async def get_upcoming_drops():
+    now = datetime.now().isoformat()
+    return await db_all(
+        "SELECT * FROM drops WHERE is_active=1 AND start_at > $1 ORDER BY start_at ASC",
+        (now,)
+    )
+
+async def get_all_drops_admin():
+    return await db_all("SELECT * FROM drops ORDER BY created_at DESC")
+
+async def add_drop(cid, name, desc, price, sizes_list, stock, start_at,
+                   card_file_id='', card_media_type='', gallery=None):
+    sizes_json   = json.dumps(sizes_list, ensure_ascii=False)
+    gallery_json = json.dumps(gallery or [], ensure_ascii=False)
+    return await db_insert(
+        '''INSERT INTO drops
+           (category_id, name, description, price, sizes, stock, start_at,
+            card_file_id, card_media_type, gallery, is_active, created_at)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,$11) RETURNING id''',
+        (cid, name, desc, price, sizes_json, stock, start_at,
+         card_file_id, card_media_type, gallery_json,
+         datetime.now().isoformat())
+    )
+
+async def del_drop(did: int):
+    await db_run('UPDATE drops SET is_active=0 WHERE id=$1', (did,))
+
+# ══════════════════════════════════════════════
+#  Сообщения бота (редактируемые)
+# ══════════════════════════════════════════════
+# Дефолтные сообщения
+BOT_MSG_DEFAULTS = {
+    'welcome':        '👋 Добро пожаловать в {shop_name}!\n\nВыберите раздел ниже:',
+    'catalog_header': '🛒 <b>Каталог</b>\n\n<blockquote>👇 Выберите категорию:</blockquote>',
+    'profile_header': '👤 <b>Мой профиль</b>',
+    'support_header': '❓ <b>Поддержка</b>\n\n<blockquote>По любым вопросам пишите нашему менеджеру.</blockquote>',
+    'about_header':   '🏬 <b>О магазине</b>',
+    'order_confirm':  '🎉 <b>Заказ #{order_id} оформлен!</b>\n\nОжидайте уведомлений о статусе.',
+    'payment_wait':   '⏳ <b>Ожидаем подтверждения менеджера</b>\n\n<blockquote>Обычно это занимает несколько минут.</blockquote>',
+    'drops_header':   '🔥 <b>Дропы</b>\n\n<blockquote>Скоро в продаже!</blockquote>',
+    'partner_header': '🤝 <b>Партнёрская программа</b>\n\nПриглашай друзей и получай бонусы!',
+}
+
+async def get_bot_msg(key: str) -> str:
+    r = await db_one('SELECT text FROM bot_messages WHERE key=$1', (key,))
+    if r and r['text']:
+        return r['text']
+    return BOT_MSG_DEFAULTS.get(key, key)
+
+async def set_bot_msg(key: str, text: str, media_type: str = '', file_id: str = ''):
+    await db_run(
+        '''INSERT INTO bot_messages(key, text, media_type, file_id) VALUES($1,$2,$3,$4)
+           ON CONFLICT(key) DO UPDATE SET text=$2, media_type=$3, file_id=$4''',
+        (key, text, media_type, file_id)
+    )
+    _cache_invalidate(f"botmsg:{key}")
+
+async def get_bot_msg_media(key: str):
+    return await db_one('SELECT * FROM bot_messages WHERE key=$1', (key,))
+
+# Среднее значение рейтинга для товара
+async def get_avg_rating(pid: int) -> float:
+    r = await db_one('SELECT AVG(rating) AS avg FROM reviews WHERE product_id=$1', (pid,))
+    if r and r['avg']:
+        return round(float(r['avg']), 1)
+    return 0.0
+
+async def get_review_count(pid: int) -> int:
+    r = await db_one('SELECT COUNT(*) AS cnt FROM reviews WHERE product_id=$1', (pid,))
+    return r['cnt'] if r else 0
 
 async def add_purchase(uid, pid, price, method='crypto'):
     await db_run(
@@ -834,6 +1152,10 @@ def kb_admin():
         [InlineKeyboardButton(text="📋 Заказы", callback_data="adm_orders")],
         [InlineKeyboardButton(text="🎟 Промокоды", callback_data="adm_promos")],
         [InlineKeyboardButton(text="👥 Пользователи", callback_data="adm_users")],
+        [InlineKeyboardButton(text="👑 Роли", callback_data="adm_roles"),
+         InlineKeyboardButton(text="🤝 Партнёры", callback_data="adm_partners")],
+        [InlineKeyboardButton(text="🔥 Дропы", callback_data="adm_drops")],
+        [InlineKeyboardButton(text="💬 Сообщения бота", callback_data="adm_botmsgs")],
         [InlineKeyboardButton(text="📊 Лог (HTML)", callback_data="adm_log")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="adm_settings")],
     ])
@@ -891,18 +1213,31 @@ async def cmd_start(msg: types.Message, state: FSMContext):
         return
 
     args = msg.text.split(maxsplit=1)
-    if len(args) > 1 and args[1].strip().lower() == "support":
+    ref_arg = args[1].strip() if len(args) > 1 else ''
+
+    if ref_arg.lower() == "support":
         await _show_support(msg.chat.id)
         return
+
+    # Обработка реф-ссылки
+    if ref_arg.startswith("ref_"):
+        ref_code = ref_arg[4:].upper()
+        partner = await get_partner_by_ref(ref_code)
+        if partner and partner['user_id'] != msg.from_user.id:
+            # Сохраняем реф в данных пользователя
+            await db_run('UPDATE users SET ref_code=$1 WHERE user_id=$2',
+                         (ref_code, msg.from_user.id))
+            _cache_invalidate(f"user:{msg.from_user.id}")
 
     if not await has_agreed_terms(msg.from_user.id):
         await _show_agreement(msg.chat.id)
         return
 
     await log_event("start", msg.from_user.id)
-    text = (f"{ae('shop')} <b>{SHOP_NAME}</b>\n\n"
-            f"<blockquote>{ae('down')} Добро пожаловать! Выберите раздел:</blockquote>")
-    await send_media(msg.chat.id, text, "main_menu", kb_main())
+    welcome_text = await get_bot_msg('welcome')
+    text = welcome_text.replace('{shop_name}', SHOP_NAME)
+    full_text = f"{ae('shop')} <b>{SHOP_NAME}</b>\n\n<blockquote>{text}</blockquote>"
+    await send_media(msg.chat.id, full_text, "main_menu", kb_main())
 
 @router.message(Command("admin"))
 async def cmd_admin(msg: types.Message, state: FSMContext):
@@ -1189,16 +1524,18 @@ async def txt_support(msg: types.Message):
 # ══════════════════════════════════════════════
 #  Профиль
 # ══════════════════════════════════════════════
-def _profile_text(tg_user: types.User, user) -> str:
+def _profile_text(tg_user: types.User, user, role: str = 'buyer') -> str:
     phone   = user['phone'] if user['phone'] else '— не указан'
     address = user['default_address'] if user['default_address'] else '— не указан'
     uname   = f"@{tg_user.username}" if tg_user.username else "— не указан"
+    role_label = ROLES.get(role, role)
     return (
         f"{ae('user')} <b>Профиль</b>\n\n"
         f"━━━━━━━━━━━━━━━━━\n"
         f"🆔 <b>ID:</b> <code>{tg_user.id}</code>\n"
         f"{ae('user')} <b>Имя:</b> {tg_user.first_name or '—'}\n"
-        f"💬 <b>Username:</b> {uname}\n\n"
+        f"💬 <b>Username:</b> {uname}\n"
+        f"👑 <b>Роль:</b> {role_label}\n\n"
         f"{ae('phone')} <b>Телефон:</b> <code>{phone}</code>\n"
         f"{ae('pin')} <b>Адрес доставки:</b>\n  <i>{address}</i>\n\n"
         f"{ae('cart')} <b>Заказов:</b> {user['total_purchases']}\n"
@@ -1213,6 +1550,7 @@ def _profile_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📞 Телефон", callback_data="profile_phone"),
          InlineKeyboardButton(text="📍 Адрес", callback_data="profile_address")],
         [InlineKeyboardButton(text="📦 Мои заказы", callback_data="my_orders")],
+        [InlineKeyboardButton(text="🤝 Партнёрская программа", callback_data="partner_program")],
     ])
 
 async def _send_profile(tg_user: types.User, user, send_fn=None, edit_msg=None):
@@ -1220,7 +1558,8 @@ async def _send_profile(tg_user: types.User, user, send_fn=None, edit_msg=None):
         if send_fn:
             await send_fn("⏳ Профиль создаётся, попробуйте снова.", parse_mode="HTML")
         return
-    text = _profile_text(tg_user, user)
+    role = await get_user_role(tg_user.id)
+    text = _profile_text(tg_user, user, role)
     kb   = _profile_kb()
     if edit_msg:
         try:
@@ -1328,53 +1667,159 @@ async def cb_my_orders(cb: types.CallbackQuery):
     if not orders:
         await cb.answer("Заказов пока нет", show_alert=True)
         return
-    text = f"{ae('archive')} <b>Мои заказы</b>\n\n━━━━━━━━━━━━━━━━━\n"
+    kb_rows = []
     for o in orders:
-        promo_line = ""
-        if o.get('promo_code'):
-            promo_line = f"  🎟 Промокод: <code>{o['promo_code']}</code> (−{fmt_price(o.get('discount', 0))})\n"
-        text += (
-            f"{ae('box')} <b>{o['pname']}</b> ({o['size']})\n"
-            f"  {fmt_price(o['price'])} — {order_status_text(o['status'])}\n"
-            f"{promo_line}"
-            f"  <i>{o['created_at'][:10]}</i>\n\n"
-        )
-    text += "━━━━━━━━━━━━━━━━━"
+        status_icon = {
+            'processing': '🔄', 'china': '✈️', 'arrived': '📦',
+            'delivered': '🚚', 'confirmed': '✅'
+        }.get(o['status'], '❓')
+        label = f"{status_icon} #{o['id']} {o['pname'][:15]} ({o['size']}) — {o['created_at'][:10]}"
+        kb_rows.append([InlineKeyboardButton(text=label, callback_data=f"myorder_{o['id']}")])
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="profile_view")])
+    text = f"{ae('archive')} <b>Мои заказы</b>\n\n<blockquote>Нажмите на заказ для подробностей:</blockquote>"
     try:
-        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb_back("profile_view"))
+        await cb.message.edit_text(text, parse_mode="HTML",
+                                   reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
     except Exception:
-        await cb.message.answer(text, parse_mode="HTML", reply_markup=kb_back("profile_view"))
+        await cb.message.answer(text, parse_mode="HTML",
+                                reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("myorder_"))
+async def cb_myorder_detail(cb: types.CallbackQuery):
+    oid   = int(cb.data.split("_")[1])
+    order = await get_order(oid)
+    if not order or order['user_id'] != cb.from_user.id:
+        await cb.answer("Заказ не найден", show_alert=True)
+        return
+    product = await get_product(order['product_id'])
+    history = await get_order_history(oid)
+    note    = await get_order_note(oid)
+
+    promo_line = ""
+    if order.get('promo_code'):
+        promo_line = f"🎟 <b>Промокод:</b> <code>{order['promo_code']}</code>\n"
+
+    note_line = f"\n📝 <b>Ваше примечание:</b>\n<i>{note}</i>\n" if note else ""
+
+    history_lines = "\n📋 <b>История статусов:</b>\n"
+    status_labels = {
+        'processing': '🔄 В обработке',
+        'china':      '✈️ Едет из Китая',
+        'arrived':    '📦 Прибыло',
+        'delivered':  '🚚 Передано',
+        'confirmed':  '✅ Подтверждено покупателем',
+    }
+    if history:
+        for h in history:
+            dt = h['created_at'][:16] if h.get('created_at') else ''
+            st = status_labels.get(h['status'], h['status'])
+            history_lines += f"  • {st} — <i>{dt}</i>\n"
+    else:
+        history_lines += "  <i>История пуста</i>\n"
+
+    text = (
+        f"📋 <b>Заказ #{oid}</b>\n\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"{ae('box')} <b>Товар:</b> {product['name'] if product else '—'}\n"
+        f"{ae('size')} <b>Размер:</b> {order['size']}\n"
+        f"{ae('money')} <b>Сумма:</b> {fmt_price(order['price'])}\n"
+        f"{promo_line}"
+        f"💳 <b>Оплата:</b> {order['method']}\n"
+        f"{ae('phone')} <b>Телефон:</b> {order['phone'] or '—'}\n"
+        f"{ae('pin')} <b>Адрес:</b> {order['address'] or '—'}\n"
+        f"🔄 <b>Статус:</b> {order_status_text(order['status'])}\n"
+        f"{ae('cal')} <b>Оформлен:</b> {order['created_at'][:16]}\n"
+        f"{note_line}"
+        f"━━━━━━━━━━━━━━━━━"
+        f"{history_lines}"
+        f"━━━━━━━━━━━━━━━━━"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="‹ К заказам", callback_data="my_orders")],
+    ])
+    try:
+        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        await cb.message.answer(text, parse_mode="HTML", reply_markup=kb)
     await cb.answer()
 
 # ══════════════════════════════════════════════
 #  Каталог
 # ══════════════════════════════════════════════
 async def show_catalog(chat_id: int):
-    cats = await get_categories()
-    if not cats:
+    cats = await get_categories(parent_id=0)
+    drops = await get_active_drops()
+    upcoming = await get_upcoming_drops()
+    kb_rows = []
+    for c in cats:
+        # Check if has subcategories
+        subcats = await get_categories(parent_id=c['id'])
+        icon = "📂" if subcats else "🗂"
+        kb_rows.append([InlineKeyboardButton(text=f"{icon} {c['name']}", callback_data=f"cat_{c['id']}")])
+    # Дропы видны только если есть активные или предстоящие
+    if drops or upcoming:
+        kb_rows.append([InlineKeyboardButton(text="🔥 Дропы", callback_data="drops_menu")])
+    if not kb_rows:
         await bot.send_message(chat_id, "📭 Категории пока не добавлены.")
         return
-    kb   = [[InlineKeyboardButton(text=f"🗂 {c['name']}", callback_data=f"cat_{c['id']}")] for c in cats]
-    text = (f"{ae('cart')} <b>Каталог</b>\n\n<blockquote>{ae('down')} Выберите категорию:</blockquote>")
-    await send_media(chat_id, text, "shop_menu", InlineKeyboardMarkup(inline_keyboard=kb))
+    cat_text = await get_bot_msg('catalog_header')
+    await send_media(chat_id, cat_text, "shop_menu", InlineKeyboardMarkup(inline_keyboard=kb_rows))
 
 @router.callback_query(F.data == "shop")
 async def cb_shop(cb: types.CallbackQuery):
-    cats = await get_categories()
-    if not cats:
+    cats = await get_categories(parent_id=0)
+    drops = await get_active_drops()
+    upcoming = await get_upcoming_drops()
+    kb_rows = []
+    for c in cats:
+        subcats = await get_categories(parent_id=c['id'])
+        icon = "📂" if subcats else "🗂"
+        kb_rows.append([InlineKeyboardButton(text=f"{icon} {c['name']}", callback_data=f"cat_{c['id']}")])
+    if drops or upcoming:
+        kb_rows.append([InlineKeyboardButton(text="🔥 Дропы", callback_data="drops_menu")])
+    if not kb_rows:
         await cb.answer("Категории пока не добавлены", show_alert=True)
         return
-    kb   = [[InlineKeyboardButton(text=f"🗂 {c['name']}", callback_data=f"cat_{c['id']}")] for c in cats]
-    text = (f"{ae('cart')} <b>Каталог</b>\n\n<blockquote>{ae('down')} Выберите категорию:</blockquote>")
+    cat_text = await get_bot_msg('catalog_header')
     try:
-        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+        await cb.message.edit_text(cat_text, parse_mode="HTML",
+                                   reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
     except Exception:
-        await cb.message.answer(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+        await cb.message.answer(cat_text, parse_mode="HTML",
+                                reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
     await cb.answer()
 
 @router.callback_query(F.data.startswith("cat_"))
 async def cb_cat(cb: types.CallbackQuery):
-    cid   = int(cb.data.split("_")[1])
+    cid = int(cb.data.split("_")[1])
+    cat = await get_category(cid)
+    # Check subcategories first
+    subcats = await get_categories(parent_id=cid)
+    if subcats:
+        kb_rows = []
+        for sc in subcats:
+            kb_rows.append([InlineKeyboardButton(text=f"🗂 {sc['name']}", callback_data=f"cat_{sc['id']}")])
+        # Also show products directly in this category
+        prods = await get_products(cid)
+        for p in prods:
+            icon = "✅" if p['stock'] > 0 else "❌"
+            kb_rows.append([InlineKeyboardButton(
+                text=f"{icon} {p['name']} · {fmt_price(p['price'])}",
+                callback_data=f"prod_{p['id']}"
+            )])
+        kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="shop")])
+        cat_name = cat['name'] if cat else 'Категория'
+        text = f"📂 <b>{cat_name}</b>\n\n<blockquote>👇 Выберите подкатегорию или товар:</blockquote>"
+        try:
+            await cb.message.edit_text(text, parse_mode="HTML",
+                                       reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+        except Exception:
+            await cb.message.answer(text, parse_mode="HTML",
+                                    reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+        await cb.answer()
+        return
+
     prods = await get_products(cid)
     if not prods:
         await cb.answer("В этой категории пока нет товаров", show_alert=True)
@@ -1382,11 +1827,15 @@ async def cb_cat(cb: types.CallbackQuery):
     kb_rows = []
     for p in prods:
         icon = "✅" if p['stock'] > 0 else "❌"
+        sid  = f" #{p.get('short_id','')}" if p.get('short_id') else ""
         kb_rows.append([InlineKeyboardButton(
-            text=f"{icon} {p['name']} · {fmt_price(p['price'])}",
+            text=f"{icon} {p['name']}{sid} · {fmt_price(p['price'])}",
             callback_data=f"prod_{p['id']}"
         )])
-    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="shop")])
+    # Back: if subcategory → go to parent, else → shop
+    parent_id = cat['parent_id'] if cat else 0
+    back_cd = f"cat_{parent_id}" if parent_id else "shop"
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data=back_cd)])
     kb_rows.append([InlineKeyboardButton(text="📢 Подключить рекламу", callback_data="ad_warning")])
     text = f"<blockquote>{ae('down')} Выберите товар:</blockquote>"
     try:
@@ -1413,6 +1862,19 @@ async def cb_prod(cb: types.CallbackQuery):
     stock   = p['stock']
     stock_s = (f"✅ В наличии ({stock} шт.)" if stock > 0 else "❌ Нет в наличии")
 
+    # Средний рейтинг
+    avg_rating  = await get_avg_rating(pid)
+    rev_count   = await get_review_count(pid)
+    stars_full  = int(avg_rating)
+    stars_empty = 5 - stars_full
+    rating_s = ""
+    if rev_count > 0:
+        rating_s = "⭐" * stars_full + "☆" * stars_empty + f"  {avg_rating}/5 ({rev_count} отзывов)"
+    else:
+        rating_s = "☆☆☆☆☆  Нет отзывов"
+
+    short_id_s = f"  <code>#{p.get('short_id','')}</code>" if p.get('short_id') else ""
+
     seller_block = ""
     if p['seller_phone'] or p['seller_username']:
         seller_block = "━━━━━━━━━━━━━━━━━\n"
@@ -1424,10 +1886,11 @@ async def cb_prod(cb: types.CallbackQuery):
 
     text = (
         f"╔═══════════════════╗\n"
-        f"║ {ae('tag')} <b>{p['name']}</b>\n"
+        f"║ {ae('tag')} <b>{p['name']}</b>{short_id_s}\n"
         f"╚═══════════════════╝\n\n"
         f"<blockquote>{p['description']}</blockquote>\n\n"
         f"━━━━━━━━━━━━━━━━━\n"
+        f"{ae('star')} {rating_s}\n"
         f"{ae('money')} <b>Цена:</b>  <code>{fmt_price(p['price'])}</code>\n"
         f"{ae('size')} <b>Размеры:</b>  {sizes_s}\n"
         f"{ae('box')} <b>Статус:</b>  {stock_s}\n"
@@ -1448,14 +1911,15 @@ async def cb_prod(cb: types.CallbackQuery):
             text=f"🖼 Галерея ({len(gallery)})", callback_data=f"gallery_{pid}_0"
         )])
     kb_rows.append([InlineKeyboardButton(text="⭐ Отзывы", callback_data=f"reviews_{pid}")])
-    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data=f"cat_{p['category_id']}")])
+    # Back button: go to category
+    cat = await get_category(p['category_id']) if p.get('category_id') else None
+    back_cd = f"cat_{p['category_id']}" if p.get('category_id') else "shop"
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data=back_cd)])
 
     markup   = InlineKeyboardMarkup(inline_keyboard=kb_rows)
     card_fid = p.get('card_file_id', '')
     card_mt  = p.get('card_media_type', '')
 
-    # ИСПРАВЛЕНИЕ БАГА: всегда удаляем старое сообщение и отправляем новое
-    # чтобы фото не пропадало при навигации назад
     try:
         await cb.message.delete()
     except Exception:
@@ -1659,6 +2123,8 @@ async def _show_payment_confirm(cb: types.CallbackQuery, pid: int, size: str,
             text="🎟 Применить промокод",
             callback_data=f"enterpromo_{pid}_{size}"
         )])
+    kb_rows.append([InlineKeyboardButton(text="📝 Добавить примечание продавцу",
+                                         callback_data=f"addnote_{pid}_{size}_{promo_code}")])
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data=f"buy_{pid}")])
 
     try:
@@ -1704,6 +2170,71 @@ async def proc_promo_enter(msg: types.Message, state: FSMContext):
         async def answer(self, *a, **kw): pass
 
     await _show_payment_confirm(FakeCB(), pid, size, promo=promo, promo_error=error)
+
+# ══════════════════════════════════════════════
+#  Примечание к заказу (необязательно)
+# ══════════════════════════════════════════════
+@router.callback_query(F.data.startswith("addnote_"))
+async def cb_addnote(cb: types.CallbackQuery, state: FSMContext):
+    parts      = cb.data.split("_", 3)
+    pid        = int(parts[1])
+    size       = parts[2]
+    promo_code = parts[3] if len(parts) > 3 else ''
+    await state.update_data(note_pid=pid, note_size=size, note_promo=promo_code)
+    await state.set_state(OrderNoteSt.entering)
+    try:
+        await cb.message.edit_text(
+            "📝 <b>Примечание продавцу</b>\n\n"
+            "<blockquote>Напишите ваше пожелание (необязательно).\n\n"
+            "Например: «Пожалуйста, оставьте посылку у подруги»\n\n"
+            "Или нажмите /skip чтобы пропустить.</blockquote>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"skipnote_{pid}_{size}_{promo_code}")
+            ]])
+        )
+    except Exception:
+        await cb.message.answer("📝 <b>Введите примечание или нажмите Пропустить:</b>",
+                                parse_mode="HTML")
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("skipnote_"))
+async def cb_skipnote(cb: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    parts      = cb.data.split("_", 3)
+    pid        = int(parts[1])
+    size       = parts[2]
+    promo_code = parts[3] if len(parts) > 3 else ''
+    promo = None
+    if promo_code:
+        promo, _ = await validate_promo(promo_code, cb.from_user.id)
+    await _show_payment_confirm(cb, pid, size, promo=promo)
+
+@router.message(OrderNoteSt.entering)
+async def proc_order_note(msg: types.Message, state: FSMContext):
+    d          = await state.get_data()
+    pid        = d.get('note_pid')
+    size       = d.get('note_size', 'ONE_SIZE')
+    promo_code = d.get('note_promo', '')
+    note       = msg.text.strip()[:500]
+    await state.update_data(pending_note=note)
+    await state.clear()
+    # Store note temporarily in state isn't persistent — we store it per pid/size/user combo in memory
+    # We'll attach it to order after payment via a side-channel cache
+    _cache_set(f"ordernote:{msg.from_user.id}:{pid}:{size}", note)
+    promo = None
+    if promo_code:
+        promo, _ = await validate_promo(promo_code, msg.from_user.id)
+
+    class FakeCB:
+        from_user = msg.from_user
+        message   = msg
+        data      = ''
+        async def answer(self, *a, **kw): pass
+
+    await msg.answer(f"✅ Примечание сохранено:\n<i>{note}</i>\n\nТеперь выберите способ оплаты:",
+                     parse_mode="HTML")
+    await _show_payment_confirm(FakeCB(), pid, size, promo=promo)
 
 # ══════════════════════════════════════════════
 #  Оплата CryptoBot
@@ -1791,9 +2322,38 @@ async def cb_chk(cb: types.CallbackQuery):
     oid = await create_order(uid, cb.from_user.username, cb.from_user.first_name,
                              pid, size, price, 'crypto', user['phone'],
                              user['default_address'], promo_code, discount)
+    # Attach pending note if exists
+    note_key = f"ordernote:{uid}:{pid}:{size}"
+    pending_note, note_hit = _cache_get(note_key)
+    if note_hit and pending_note:
+        await set_order_note(oid, pending_note)
+        _cache_invalidate(note_key)
     await add_purchase(uid, pid, price, 'crypto')
     await reduce_stock(pid)
     bonus = await add_bonus(uid, price)
+
+    # Partner referral bonus
+    buyer = await get_user(uid)
+    ref_code = buyer.get('ref_code', '') if buyer else ''
+    if ref_code:
+        partner = await get_partner_by_ref(ref_code)
+        if partner and partner['user_id'] != uid:
+            is_new = buyer['total_purchases'] <= 1
+            try:
+                bonus_cfg = json.loads(partner['bonus_new'] if is_new else partner['bonus_repeat'])
+            except Exception:
+                bonus_cfg = {"type": "percent", "value": 5}
+            ref_bonus = calc_partner_bonus(price, bonus_cfg)
+            if ref_bonus > 0:
+                await record_partner_referral(partner['user_id'], uid, is_new, ref_bonus, 0)
+                try:
+                    await bot.send_message(partner['user_id'],
+                        f"🤝 <b>Партнёрский бонус!</b>\n\nПо вашей ссылке {'новый' if is_new else 'повторный'} "
+                        f"покупатель совершил заказ.\n💰 +{fmt_price(ref_bonus)} на бонусный счёт!",
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
 
     if promo_code:
         promo_row = await get_promo_by_code(promo_code)
@@ -2062,6 +2622,8 @@ async def _notify_manager_new_order(oid, uid, uname, first_name, product, size,
     if promo_code:
         promo_line = (f"🎟 <b>Промокод:</b> <code>{promo_code}</code>\n"
                       f"💰 <b>Скидка:</b> {fmt_price(discount)}\n")
+    note = await get_order_note(oid)
+    note_line = f"📝 <b>Примечание:</b>\n<blockquote>{note}</blockquote>\n" if note else ""
 
     text = (
         f"🛍 <b>НОВЫЙ ЗАКАЗ #{oid}</b>\n\n"
@@ -2076,6 +2638,7 @@ async def _notify_manager_new_order(oid, uid, uname, first_name, product, size,
         f"💳 <b>Оплата:</b> {method}\n"
         f"{ae('phone')} <b>Телефон:</b> {phone or '—'}\n"
         f"{ae('pin')} <b>Адрес:</b> {address or '—'}\n"
+        f"{note_line}"
         f"{ae('cal')} {fmt_dt()}\n"
         f"━━━━━━━━━━━━━━━━━"
     )
@@ -3275,21 +3838,60 @@ async def proc_broadcast(msg: types.Message, state: FSMContext):
 async def cb_adm_cats(cb: types.CallbackQuery):
     if not admin_guard(cb.from_user.id):
         return
-    cats    = await get_categories()
+    cats    = await get_all_categories()
     kb_rows = []
     for c in cats:
+        parent_mark = f" ↳" if c.get('parent_id', 0) else ""
         kb_rows.append([
-            InlineKeyboardButton(text=f"📂 {c['name']}", callback_data=f"ecat_{c['id']}"),
+            InlineKeyboardButton(text=f"📂{parent_mark} {c['name']}", callback_data=f"ecat_{c['id']}"),
             InlineKeyboardButton(text="🗑", callback_data=f"dcat_{c['id']}"),
         ])
-    kb_rows.append([InlineKeyboardButton(text="➕ Добавить", callback_data="addcat")])
+    kb_rows.append([InlineKeyboardButton(text="➕ Добавить категорию", callback_data="addcat")])
+    kb_rows.append([InlineKeyboardButton(text="➕ Добавить подкатегорию", callback_data="addsubcat")])
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_panel")])
     try:
-        await cb.message.edit_text(f"{ae('folder')} <b>Категории</b>", parse_mode="HTML",
+        await cb.message.edit_text(f"{ae('folder')} <b>Категории</b>\n\n<blockquote>↳ = подкатегория</blockquote>",
+                                   parse_mode="HTML",
                                    reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
     except Exception:
         await cb.message.answer(f"{ae('folder')} <b>Категории</b>", parse_mode="HTML",
                                 reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    await cb.answer()
+
+@router.callback_query(F.data == "addsubcat")
+async def cb_addsubcat(cb: types.CallbackQuery, state: FSMContext):
+    if not admin_guard(cb.from_user.id):
+        return
+    cats = await get_categories(parent_id=0)
+    if not cats:
+        await cb.answer("Сначала создайте родительскую категорию!", show_alert=True)
+        return
+    kb_rows = [[InlineKeyboardButton(text=f"📂 {c['name']}", callback_data=f"subcat_parent_{c['id']}")] for c in cats]
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_cats")])
+    try:
+        await cb.message.edit_text("📂 <b>Выберите родительскую категорию:</b>",
+                                   parse_mode="HTML",
+                                   reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    except Exception:
+        await cb.message.answer("📂 <b>Выберите родительскую категорию:</b>",
+                                parse_mode="HTML",
+                                reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("subcat_parent_"))
+async def cb_subcat_parent(cb: types.CallbackQuery, state: FSMContext):
+    if not admin_guard(cb.from_user.id):
+        return
+    parent_id = int(cb.data.split("_")[2])
+    await state.update_data(subcat_parent_id=parent_id)
+    await state.set_state(AdminSt.add_cat_name)
+    await state.update_data(is_subcat=True)
+    try:
+        await cb.message.edit_text("📂 <b>Введите название подкатегории:</b>",
+                                   parse_mode="HTML",
+                                   reply_markup=kb_back("addsubcat"))
+    except Exception:
+        await cb.message.answer("📂 <b>Введите название подкатегории:</b>", parse_mode="HTML")
     await cb.answer()
 
 @router.callback_query(F.data == "addcat")
@@ -3309,9 +3911,13 @@ async def cb_addcat(cb: types.CallbackQuery, state: FSMContext):
 
 @router.message(AdminSt.add_cat_name)
 async def proc_cat_name(msg: types.Message, state: FSMContext):
-    await add_category(msg.text)
+    d = await state.get_data()
+    is_subcat = d.get('is_subcat', False)
+    parent_id = d.get('subcat_parent_id', 0)
+    await add_category(msg.text, parent_id=parent_id if is_subcat else 0)
     await state.clear()
-    await msg.answer("✅ Категория добавлена!", reply_markup=kb_admin_back())
+    kind = "Подкатегория" if is_subcat else "Категория"
+    await msg.answer(f"✅ {kind} добавлена!", reply_markup=kb_admin_back())
 
 @router.callback_query(F.data.startswith("dcat_"))
 async def cb_dcat(cb: types.CallbackQuery):
@@ -4009,7 +4615,836 @@ NAV_CALLBACKS = {
     "adm_panel", "adm_media", "adm_cats", "adm_products", "addprod",
     "adm_settings", "ad_warning", "partnership", "about_back",
     "adm_promos", "support_back", "support_contacts", "adm_users",
+    "adm_roles", "adm_partners", "adm_drops", "adm_botmsgs",
 }
+
+# ══════════════════════════════════════════════
+#  ДРОПЫ — Пользователи
+# ══════════════════════════════════════════════
+@router.callback_query(F.data == "drops_menu")
+async def cb_drops_menu(cb: types.CallbackQuery):
+    active  = await get_active_drops()
+    upcoming = await get_upcoming_drops()
+    kb_rows = []
+    drops_header = await get_bot_msg('drops_header')
+
+    if active:
+        for d in active:
+            sizes = json.loads(d['sizes'] or '[]')
+            sz = ', '.join(sizes) if sizes else '—'
+            kb_rows.append([InlineKeyboardButton(
+                text=f"🔥 {d['name']} · {fmt_price(d['price'])}",
+                callback_data=f"drop_{d['id']}"
+            )])
+    if upcoming:
+        for d in upcoming:
+            start = d['start_at'][:16] if d.get('start_at') else '?'
+            kb_rows.append([InlineKeyboardButton(
+                text=f"⏳ {d['name']} — старт: {start}",
+                callback_data=f"drop_{d['id']}"
+            )])
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="shop")])
+    try:
+        await cb.message.edit_text(drops_header, parse_mode="HTML",
+                                   reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    except Exception:
+        await cb.message.answer(drops_header, parse_mode="HTML",
+                                reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("drop_"))
+async def cb_drop_detail(cb: types.CallbackQuery):
+    did = int(cb.data.split("_")[1])
+    d   = await db_one('SELECT * FROM drops WHERE id=$1', (did,))
+    if not d:
+        await cb.answer("Дроп не найден", show_alert=True)
+        return
+    now = datetime.now().isoformat()
+    sizes   = json.loads(d['sizes'] or '[]')
+    sizes_s = ', '.join(sizes) if sizes else '—'
+    is_live = d['start_at'] <= now
+    status  = "🔥 Уже в продаже!" if is_live else f"⏳ Старт: {d['start_at'][:16]}"
+
+    text = (
+        f"🔥 <b>{d['name']}</b>\n\n"
+        f"<blockquote>{d['description']}</blockquote>\n\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"{ae('money')} <b>Цена:</b> <code>{fmt_price(d['price'])}</code>\n"
+        f"{ae('size')} <b>Размеры:</b> {sizes_s}\n"
+        f"{ae('box')} <b>Статус:</b> {status}\n"
+        f"━━━━━━━━━━━━━━━━━"
+    )
+    kb_rows = []
+    if is_live and d['stock'] > 0:
+        kb_rows.append([InlineKeyboardButton(text="🛒 Купить", callback_data=f"buy_drop_{did}")])
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="drops_menu")])
+    try:
+        await cb.message.edit_text(text, parse_mode="HTML",
+                                   reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    except Exception:
+        await cb.message.answer(text, parse_mode="HTML",
+                                reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    await cb.answer()
+
+# ══════════════════════════════════════════════
+#  ПАРТНЁРСКАЯ ПРОГРАММА — Пользователи
+# ══════════════════════════════════════════════
+@router.callback_query(F.data == "partner_program")
+async def cb_partner_program(cb: types.CallbackQuery):
+    uid     = cb.from_user.id
+    partner = await get_partner(uid)
+    header  = await get_bot_msg('partner_header')
+
+    if partner:
+        me = await bot.get_me()
+        ref_url = f"https://t.me/{me.username}?start=ref_{partner['ref_code']}"
+        try:
+            bonus_new    = json.loads(partner['bonus_new'])
+            bonus_repeat = json.loads(partner['bonus_repeat'])
+        except Exception:
+            bonus_new    = {"type": "percent", "value": 5}
+            bonus_repeat = {"type": "percent", "value": 3}
+
+        def fmt_bonus(b):
+            if b['type'] == 'percent':
+                return f"{b['value']}%"
+            return fmt_price(b['value'])
+
+        text = (
+            f"🤝 <b>Партнёрская программа</b>\n\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            f"🔗 <b>Ваша реф-ссылка:</b>\n<code>{ref_url}</code>\n\n"
+            f"👥 <b>Приглашено:</b> {partner['total_invited']}\n"
+            f"💰 <b>Заработано:</b> {fmt_price(partner['total_earned'])}\n\n"
+            f"🎁 <b>Бонус за нового покупателя:</b> {fmt_bonus(bonus_new)}\n"
+            f"🔄 <b>Бонус за повторного:</b> {fmt_bonus(bonus_repeat)}\n"
+            f"━━━━━━━━━━━━━━━━━"
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📊 Мои приглашённые", callback_data="partner_refs")],
+            [InlineKeyboardButton(text="⚙️ Настроить бонусы", callback_data="partner_set_bonuses")],
+            [InlineKeyboardButton(text="‹ Назад", callback_data="profile_view")],
+        ])
+    else:
+        text = (
+            f"{header}\n\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            f"<blockquote>Зарегистрируйтесь как партнёр и получайте бонусы за каждого приглашённого покупателя!</blockquote>"
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🚀 Стать партнёром", callback_data="become_partner")],
+            [InlineKeyboardButton(text="‹ Назад", callback_data="profile_view")],
+        ])
+    try:
+        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        await cb.message.answer(text, parse_mode="HTML", reply_markup=kb)
+    await cb.answer()
+
+@router.callback_query(F.data == "become_partner")
+async def cb_become_partner(cb: types.CallbackQuery, state: FSMContext):
+    await state.set_state(PartnerSt.choose_ref)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎲 Сгенерировать автоматически", callback_data="partner_autoref")],
+        [InlineKeyboardButton(text="✏️ Ввести свой код", callback_data="partner_customref")],
+        [InlineKeyboardButton(text="‹ Назад", callback_data="partner_program")],
+    ])
+    try:
+        await cb.message.edit_text(
+            "🔗 <b>Создание реф-ссылки</b>\n\n"
+            "<blockquote>Выберите тип реферального кода:</blockquote>",
+            parse_mode="HTML", reply_markup=kb
+        )
+    except Exception:
+        await cb.message.answer("🔗 <b>Создание реф-ссылки</b>", parse_mode="HTML", reply_markup=kb)
+    await cb.answer()
+
+@router.callback_query(F.data == "partner_autoref")
+async def cb_partner_autoref(cb: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    uid      = cb.from_user.id
+    ref_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    ok = await create_partner(uid, ref_code)
+    if not ok:
+        await cb.answer("Ошибка: код уже занят, попробуйте ещё раз.", show_alert=True)
+        return
+    me  = await bot.get_me()
+    url = f"https://t.me/{me.username}?start=ref_{ref_code}"
+    await cb.message.edit_text(
+        f"✅ <b>Партнёрский аккаунт создан!</b>\n\n"
+        f"🔗 <b>Ваша ссылка:</b>\n<code>{url}</code>\n\n"
+        f"<blockquote>Теперь настройте бонусы, которые вы будете получать за каждого приглашённого покупателя.</blockquote>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⚙️ Настроить бонусы", callback_data="partner_set_bonuses")],
+            [InlineKeyboardButton(text="‹ Профиль", callback_data="profile_view")],
+        ])
+    )
+    await cb.answer("✅ Готово!")
+
+@router.callback_query(F.data == "partner_customref")
+async def cb_partner_customref(cb: types.CallbackQuery, state: FSMContext):
+    await state.set_state(PartnerSt.custom_ref)
+    try:
+        await cb.message.edit_text(
+            "✏️ <b>Введите ваш реф-код</b>\n\n"
+            "<blockquote>Только латинские буквы и цифры, от 4 до 16 символов.\nПример: ALEX2024</blockquote>",
+            parse_mode="HTML", reply_markup=kb_back("become_partner")
+        )
+    except Exception:
+        pass
+    await cb.answer()
+
+@router.message(PartnerSt.custom_ref)
+async def proc_partner_customref(msg: types.Message, state: FSMContext):
+    await state.clear()
+    code = msg.text.strip().upper()
+    if not code.isalnum() or len(code) < 4 or len(code) > 16:
+        await msg.answer("❌ Код должен содержать только буквы/цифры, от 4 до 16 символов.")
+        return
+    ok = await create_partner(msg.from_user.id, code)
+    if not ok:
+        await msg.answer("❌ Этот код уже занят. Попробуйте другой.")
+        return
+    me  = await bot.get_me()
+    url = f"https://t.me/{me.username}?start=ref_{code}"
+    await msg.answer(
+        f"✅ <b>Партнёрский аккаунт создан!</b>\n\n"
+        f"🔗 <b>Ваша ссылка:</b>\n<code>{url}</code>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⚙️ Настроить бонусы", callback_data="partner_set_bonuses")],
+            [InlineKeyboardButton(text="‹ Профиль", callback_data="profile_view")],
+        ])
+    )
+
+BONUS_OPTIONS_NEW = [
+    ("3% от суммы заказа", {"type": "percent", "value": 3}),
+    ("5% от суммы заказа", {"type": "percent", "value": 5}),
+    ("10% от суммы заказа", {"type": "percent", "value": 10}),
+    ("500 ₸ фиксированно", {"type": "fixed", "value": 500}),
+    ("1000 ₸ фиксированно", {"type": "fixed", "value": 1000}),
+]
+BONUS_OPTIONS_REPEAT = [
+    ("2% от суммы заказа", {"type": "percent", "value": 2}),
+    ("3% от суммы заказа", {"type": "percent", "value": 3}),
+    ("5% от суммы заказа", {"type": "percent", "value": 5}),
+    ("200 ₸ фиксированно", {"type": "fixed", "value": 200}),
+    ("500 ₸ фиксированно", {"type": "fixed", "value": 500}),
+]
+
+@router.callback_query(F.data == "partner_set_bonuses")
+async def cb_partner_set_bonuses(cb: types.CallbackQuery):
+    kb_rows = []
+    for label, val in BONUS_OPTIONS_NEW:
+        kb_rows.append([InlineKeyboardButton(
+            text=f"🆕 {label}",
+            callback_data=f"pbonus_new_{json.dumps(val)}"
+        )])
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="partner_program")])
+    try:
+        await cb.message.edit_text(
+            "⚙️ <b>Бонус за нового покупателя</b>\n\n"
+            "<blockquote>Выберите размер бонуса который вы получите когда новый пользователь (впервые) сделает покупку по вашей ссылке:</blockquote>",
+            parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
+        )
+    except Exception:
+        pass
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("pbonus_new_"))
+async def cb_pbonus_new(cb: types.CallbackQuery):
+    raw = cb.data[len("pbonus_new_"):]
+    try:
+        bonus_new = json.loads(raw)
+    except Exception:
+        await cb.answer("Ошибка", show_alert=True)
+        return
+    kb_rows = []
+    for label, val in BONUS_OPTIONS_REPEAT:
+        kb_rows.append([InlineKeyboardButton(
+            text=f"🔄 {label}",
+            callback_data=f"pbonus_rep_{json.dumps(val)}_{json.dumps(bonus_new)}"
+        )])
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="partner_set_bonuses")])
+    try:
+        await cb.message.edit_text(
+            "⚙️ <b>Бонус за повторного покупателя</b>\n\n"
+            "<blockquote>Выберите бонус за покупки пользователей, которые уже покупали ранее:</blockquote>",
+            parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
+        )
+    except Exception:
+        pass
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("pbonus_rep_"))
+async def cb_pbonus_rep(cb: types.CallbackQuery):
+    raw = cb.data[len("pbonus_rep_"):]
+    # format: {repeat_json}_{new_json}
+    idx = raw.rfind("_")
+    if idx == -1:
+        await cb.answer("Ошибка", show_alert=True)
+        return
+    try:
+        bonus_repeat = json.loads(raw[:idx])
+        bonus_new    = json.loads(raw[idx+1:])
+    except Exception:
+        await cb.answer("Ошибка", show_alert=True)
+        return
+    uid = cb.from_user.id
+    await update_partner_bonuses(uid, bonus_new, bonus_repeat)
+    def fmt_b(b):
+        return f"{b['value']}%" if b['type'] == 'percent' else fmt_price(b['value'])
+    await cb.message.edit_text(
+        f"✅ <b>Бонусы сохранены!</b>\n\n"
+        f"🆕 Новый покупатель: <b>{fmt_b(bonus_new)}</b>\n"
+        f"🔄 Повторный покупатель: <b>{fmt_b(bonus_repeat)}</b>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="‹ Партнёрская программа", callback_data="partner_program")
+        ]])
+    )
+    await cb.answer("✅ Сохранено!")
+
+@router.callback_query(F.data == "partner_refs")
+async def cb_partner_refs(cb: types.CallbackQuery):
+    refs = await get_partner_referrals(cb.from_user.id, limit=20)
+    if not refs:
+        await cb.answer("Приглашённых пока нет", show_alert=True)
+        return
+    lines = []
+    for r in refs:
+        uname = f"@{r['username']}" if r.get('username') else str(r['referred_uid'])
+        kind  = "🆕 Новый" if r['is_new_buyer'] else "🔄 Повторный"
+        bonus = fmt_price(r['bonus_amount'])
+        dt    = r['created_at'][:10] if r.get('created_at') else ''
+        lines.append(f"{kind} {uname} | +{bonus} | {dt}")
+    text = "📊 <b>Мои приглашённые</b>\n\n━━━━━━━━━━━━━━━━━\n" + "\n".join(lines) + "\n━━━━━━━━━━━━━━━━━"
+    try:
+        await cb.message.edit_text(text, parse_mode="HTML",
+                                   reply_markup=kb_back("partner_program"))
+    except Exception:
+        await cb.message.answer(text, parse_mode="HTML",
+                                reply_markup=kb_back("partner_program"))
+    await cb.answer()
+
+# ══════════════════════════════════════════════
+#  ADMIN — Роли
+# ══════════════════════════════════════════════
+@router.callback_query(F.data == "adm_roles")
+async def cb_adm_roles(cb: types.CallbackQuery):
+    if not admin_guard(cb.from_user.id):
+        return
+    rows = await db_all('SELECT ur.*, u.username, u.first_name FROM user_roles ur LEFT JOIN users u ON ur.user_id=u.user_id ORDER BY ur.granted_at DESC LIMIT 30')
+    kb_rows = []
+    for r in rows:
+        uname = f"@{r['username']}" if r.get('username') else str(r['user_id'])
+        rlabel = ROLES.get(r['role'], r['role'])
+        kb_rows.append([InlineKeyboardButton(
+            text=f"{rlabel} — {uname}",
+            callback_data=f"adm_role_edit_{r['user_id']}"
+        )])
+    kb_rows.append([InlineKeyboardButton(text="➕ Назначить роль", callback_data="adm_role_assign")])
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_panel")])
+    try:
+        await cb.message.edit_text(
+            "👑 <b>Управление ролями</b>\n\n<blockquote>Только владелец (admin) может менять роли.</blockquote>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
+        )
+    except Exception:
+        await cb.message.answer("👑 <b>Управление ролями</b>", parse_mode="HTML",
+                                reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    await cb.answer()
+
+@router.callback_query(F.data == "adm_role_assign")
+async def cb_adm_role_assign(cb: types.CallbackQuery, state: FSMContext):
+    if not admin_guard(cb.from_user.id):
+        return
+    await state.set_state(AdminSt.role_user_id)
+    try:
+        await cb.message.edit_text(
+            "👑 <b>Назначить роль</b>\n\n<blockquote>Введите Telegram ID пользователя:</blockquote>",
+            parse_mode="HTML", reply_markup=kb_back("adm_roles")
+        )
+    except Exception:
+        pass
+    await cb.answer()
+
+@router.message(AdminSt.role_user_id)
+async def proc_role_user_id(msg: types.Message, state: FSMContext):
+    try:
+        uid = int(msg.text.strip())
+    except ValueError:
+        await msg.answer("❌ Введите числовой Telegram ID.")
+        return
+    user = await get_user(uid)
+    if not user:
+        await msg.answer("❌ Пользователь не найден в базе.")
+        return
+    await state.update_data(role_target_uid=uid)
+    await state.clear()
+    uname = f"@{user['username']}" if user.get('username') else str(uid)
+    current_role = await get_user_role(uid)
+    kb_rows = []
+    for role_key, role_label in ROLES.items():
+        mark = "✓ " if current_role == role_key else ""
+        kb_rows.append([InlineKeyboardButton(
+            text=f"{mark}{role_label}",
+            callback_data=f"setrole_{uid}_{role_key}"
+        )])
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_roles")])
+    await msg.answer(
+        f"👤 <b>{uname}</b>\nТекущая роль: {ROLES.get(current_role, current_role)}\n\n"
+        f"<blockquote>Выберите новую роль:</blockquote>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
+    )
+
+@router.callback_query(F.data.startswith("setrole_"))
+async def cb_setrole(cb: types.CallbackQuery):
+    if not admin_guard(cb.from_user.id):
+        return
+    parts   = cb.data.split("_", 2)
+    uid     = int(parts[1])
+    role    = parts[2]
+    await set_user_role(uid, role, cb.from_user.id)
+    # If partner role — also create partner record if not exists
+    if role == 'partner':
+        existing = await get_partner(uid)
+        if not existing:
+            auto_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+            await create_partner(uid, auto_code)
+    rlabel = ROLES.get(role, role)
+    try:
+        await bot.send_message(uid,
+            f"👑 <b>Ваша роль изменена</b>\n\nНовая роль: {rlabel}",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+    await cb.answer(f"✅ Роль {rlabel} назначена", show_alert=True)
+    await cb_adm_roles(cb)
+
+@router.callback_query(F.data.startswith("adm_role_edit_"))
+async def cb_adm_role_edit(cb: types.CallbackQuery):
+    if not admin_guard(cb.from_user.id):
+        return
+    uid  = int(cb.data.split("_")[3])
+    user = await get_user(uid)
+    current_role = await get_user_role(uid)
+    uname = f"@{user['username']}" if user and user.get('username') else str(uid)
+    kb_rows = []
+    for role_key, role_label in ROLES.items():
+        mark = "✓ " if current_role == role_key else ""
+        kb_rows.append([InlineKeyboardButton(
+            text=f"{mark}{role_label}",
+            callback_data=f"setrole_{uid}_{role_key}"
+        )])
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_roles")])
+    try:
+        await cb.message.edit_text(
+            f"👤 <b>{uname}</b>\nТекущая роль: {ROLES.get(current_role, current_role)}\n\n"
+            f"<blockquote>Выберите новую роль:</blockquote>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
+        )
+    except Exception:
+        pass
+    await cb.answer()
+
+# ══════════════════════════════════════════════
+#  ADMIN — Партнёры
+# ══════════════════════════════════════════════
+@router.callback_query(F.data == "adm_partners")
+async def cb_adm_partners(cb: types.CallbackQuery):
+    if not admin_guard(cb.from_user.id):
+        return
+    partners = await db_all(
+        '''SELECT p.*, u.username, u.first_name FROM partners p
+           LEFT JOIN users u ON p.user_id=u.user_id
+           ORDER BY p.total_earned DESC LIMIT 30'''
+    )
+    kb_rows = []
+    for p in partners:
+        uname = f"@{p['username']}" if p.get('username') else str(p['user_id'])
+        kb_rows.append([InlineKeyboardButton(
+            text=f"🤝 {uname} — {p['ref_code']} | {fmt_price(p['total_earned'])}",
+            callback_data=f"adm_partner_{p['user_id']}"
+        )])
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_panel")])
+    try:
+        await cb.message.edit_text(
+            "🤝 <b>Партнёры</b>\n\n<blockquote>Нажмите для управления:</blockquote>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
+        )
+    except Exception:
+        await cb.message.answer("🤝 <b>Партнёры</b>", parse_mode="HTML",
+                                reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("adm_partner_"))
+async def cb_adm_partner_detail(cb: types.CallbackQuery):
+    if not admin_guard(cb.from_user.id):
+        return
+    uid  = int(cb.data.split("_")[2])
+    p    = await get_partner(uid)
+    user = await get_user(uid)
+    if not p:
+        await cb.answer("Партнёр не найден", show_alert=True)
+        return
+    uname = f"@{user['username']}" if user and user.get('username') else str(uid)
+    try:
+        bonus_new    = json.loads(p['bonus_new'])
+        bonus_repeat = json.loads(p['bonus_repeat'])
+    except Exception:
+        bonus_new    = {"type": "percent", "value": 5}
+        bonus_repeat = {"type": "percent", "value": 3}
+
+    def fmt_b(b):
+        return f"{b['value']}%" if b['type'] == 'percent' else fmt_price(b['value'])
+
+    text = (
+        f"🤝 <b>Партнёр: {uname}</b>\n\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"🔗 <b>Реф-код:</b> <code>{p['ref_code']}</code>\n"
+        f"👥 <b>Приглашено:</b> {p['total_invited']}\n"
+        f"💰 <b>Заработано:</b> {fmt_price(p['total_earned'])}\n"
+        f"🆕 <b>Бонус (новый):</b> {fmt_b(bonus_new)}\n"
+        f"🔄 <b>Бонус (повторный):</b> {fmt_b(bonus_repeat)}\n"
+        f"━━━━━━━━━━━━━━━━━"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Изменить бонус (новый)",
+                              callback_data=f"adm_pbon_new_{uid}")],
+        [InlineKeyboardButton(text="✏️ Изменить бонус (повторный)",
+                              callback_data=f"adm_pbon_rep_{uid}")],
+        [InlineKeyboardButton(text="‹ Назад", callback_data="adm_partners")],
+    ])
+    try:
+        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        await cb.message.answer(text, parse_mode="HTML", reply_markup=kb)
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("adm_pbon_new_"))
+async def cb_adm_pbon_new(cb: types.CallbackQuery):
+    if not admin_guard(cb.from_user.id):
+        return
+    uid  = int(cb.data.split("_")[3])
+    kb_rows = []
+    for label, val in BONUS_OPTIONS_NEW:
+        kb_rows.append([InlineKeyboardButton(
+            text=f"🆕 {label}",
+            callback_data=f"adm_pset_new_{uid}_{json.dumps(val)}"
+        )])
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data=f"adm_partner_{uid}")])
+    try:
+        await cb.message.edit_text("✏️ <b>Бонус за нового покупателя:</b>",
+                                   parse_mode="HTML",
+                                   reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    except Exception:
+        pass
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("adm_pbon_rep_"))
+async def cb_adm_pbon_rep(cb: types.CallbackQuery):
+    if not admin_guard(cb.from_user.id):
+        return
+    uid  = int(cb.data.split("_")[3])
+    kb_rows = []
+    for label, val in BONUS_OPTIONS_REPEAT:
+        kb_rows.append([InlineKeyboardButton(
+            text=f"🔄 {label}",
+            callback_data=f"adm_pset_rep_{uid}_{json.dumps(val)}"
+        )])
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data=f"adm_partner_{uid}")])
+    try:
+        await cb.message.edit_text("✏️ <b>Бонус за повторного покупателя:</b>",
+                                   parse_mode="HTML",
+                                   reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    except Exception:
+        pass
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("adm_pset_new_"))
+async def cb_adm_pset_new(cb: types.CallbackQuery):
+    if not admin_guard(cb.from_user.id):
+        return
+    raw  = cb.data[len("adm_pset_new_"):]
+    idx  = raw.find("_")
+    uid  = int(raw[:idx])
+    val  = json.loads(raw[idx+1:])
+    p    = await get_partner(uid)
+    if not p:
+        await cb.answer("Партнёр не найден", show_alert=True)
+        return
+    try:
+        current_repeat = json.loads(p['bonus_repeat'])
+    except Exception:
+        current_repeat = {"type": "percent", "value": 3}
+    await update_partner_bonuses(uid, val, current_repeat)
+    await cb.answer("✅ Бонус обновлён", show_alert=True)
+    await cb_adm_partner_detail(cb)
+
+@router.callback_query(F.data.startswith("adm_pset_rep_"))
+async def cb_adm_pset_rep(cb: types.CallbackQuery):
+    if not admin_guard(cb.from_user.id):
+        return
+    raw  = cb.data[len("adm_pset_rep_"):]
+    idx  = raw.find("_")
+    uid  = int(raw[:idx])
+    val  = json.loads(raw[idx+1:])
+    p    = await get_partner(uid)
+    if not p:
+        await cb.answer("Партнёр не найден", show_alert=True)
+        return
+    try:
+        current_new = json.loads(p['bonus_new'])
+    except Exception:
+        current_new = {"type": "percent", "value": 5}
+    await update_partner_bonuses(uid, current_new, val)
+    await cb.answer("✅ Бонус обновлён", show_alert=True)
+    await cb_adm_partner_detail(cb)
+
+# ══════════════════════════════════════════════
+#  ADMIN — Дропы
+# ══════════════════════════════════════════════
+@router.callback_query(F.data == "adm_drops")
+async def cb_adm_drops(cb: types.CallbackQuery):
+    if not admin_guard(cb.from_user.id):
+        return
+    drops = await get_all_drops_admin()
+    kb_rows = []
+    for d in drops:
+        now    = datetime.now().isoformat()
+        status = "🔥" if (d['is_active'] and d['start_at'] <= now) else ("⏳" if d['is_active'] else "❌")
+        kb_rows.append([
+            InlineKeyboardButton(text=f"{status} {d['name']}", callback_data=f"adm_drop_{d['id']}"),
+            InlineKeyboardButton(text="🗑", callback_data=f"del_drop_{d['id']}"),
+        ])
+    kb_rows.append([InlineKeyboardButton(text="➕ Добавить дроп", callback_data="add_drop")])
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_panel")])
+    try:
+        await cb.message.edit_text(
+            "🔥 <b>Дропы</b>\n\n<blockquote>🔥 = активен | ⏳ = ожидает старта | ❌ = скрыт</blockquote>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
+        )
+    except Exception:
+        await cb.message.answer("🔥 <b>Дропы</b>", parse_mode="HTML",
+                                reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("del_drop_"))
+async def cb_del_drop(cb: types.CallbackQuery):
+    if not admin_guard(cb.from_user.id):
+        return
+    did = int(cb.data.split("_")[2])
+    await del_drop(did)
+    await cb.answer("✅ Дроп удалён", show_alert=True)
+    await cb_adm_drops(cb)
+
+@router.callback_query(F.data == "add_drop")
+async def cb_add_drop(cb: types.CallbackQuery, state: FSMContext):
+    if not admin_guard(cb.from_user.id):
+        return
+    cats = await get_all_categories()
+    kb_rows = [[InlineKeyboardButton(text=f"📂 {c['name']}", callback_data=f"drop_cat_{c['id']}")] for c in cats]
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_drops")])
+    try:
+        await cb.message.edit_text(
+            "🔥 <b>Новый дроп</b>\n\n<blockquote>Шаг 1 — Выберите категорию (или создайте без категории):</blockquote>",
+            parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
+        )
+    except Exception:
+        pass
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("drop_cat_"))
+async def cb_drop_cat(cb: types.CallbackQuery, state: FSMContext):
+    if not admin_guard(cb.from_user.id):
+        return
+    cid = int(cb.data.split("_")[2])
+    await state.update_data(drop_cid=cid)
+    await state.set_state(AdminSt.add_drop_name)
+    try:
+        await cb.message.edit_text("🔥 <b>Шаг 2 — Название дропа:</b>",
+                                   parse_mode="HTML", reply_markup=kb_back("add_drop"))
+    except Exception:
+        pass
+    await cb.answer()
+
+@router.message(AdminSt.add_drop_name)
+async def proc_drop_name(msg: types.Message, state: FSMContext):
+    await state.update_data(drop_name=msg.text.strip())
+    await state.set_state(AdminSt.add_drop_desc)
+    await msg.answer("🔥 <b>Шаг 3 — Описание дропа:</b>", parse_mode="HTML", reply_markup=kb_back("add_drop"))
+
+@router.message(AdminSt.add_drop_desc)
+async def proc_drop_desc(msg: types.Message, state: FSMContext):
+    await state.update_data(drop_desc=msg.text.strip())
+    await state.set_state(AdminSt.add_drop_price)
+    await msg.answer("🔥 <b>Шаг 4 — Цена в ₸:</b>", parse_mode="HTML")
+
+@router.message(AdminSt.add_drop_price)
+async def proc_drop_price(msg: types.Message, state: FSMContext):
+    try:
+        price = float(msg.text.replace(',', '.').replace(' ', ''))
+    except ValueError:
+        await msg.answer("❌ Введите число.")
+        return
+    await state.update_data(drop_price=price)
+    await state.set_state(AdminSt.add_drop_sizes)
+    await msg.answer("🔥 <b>Шаг 5 — Размеры (через запятую или «нет»):</b>", parse_mode="HTML")
+
+@router.message(AdminSt.add_drop_sizes)
+async def proc_drop_sizes(msg: types.Message, state: FSMContext):
+    raw = msg.text.strip()
+    if raw.lower() in ('нет', 'no', '-'):
+        sizes = []
+    else:
+        sizes = [s.strip().upper() for s in raw.split(',') if s.strip()]
+    await state.update_data(drop_sizes=sizes)
+    await state.set_state(AdminSt.add_drop_stock)
+    await msg.answer("🔥 <b>Шаг 6 — Количество (остаток):</b>", parse_mode="HTML")
+
+@router.message(AdminSt.add_drop_stock)
+async def proc_drop_stock(msg: types.Message, state: FSMContext):
+    try:
+        stock = int(msg.text.strip())
+    except ValueError:
+        await msg.answer("❌ Введите целое число.")
+        return
+    await state.update_data(drop_stock=stock)
+    await state.set_state(AdminSt.add_drop_start_at)
+    await msg.answer(
+        "🔥 <b>Шаг 7 — Дата и время старта продаж</b>\n\n"
+        "<blockquote>Формат: ДД.ММ.ГГГГ ЧЧ:ММ\nПример: 25.12.2025 12:00</blockquote>",
+        parse_mode="HTML"
+    )
+
+@router.message(AdminSt.add_drop_start_at)
+async def proc_drop_start(msg: types.Message, state: FSMContext):
+    raw = msg.text.strip()
+    try:
+        dt = datetime.strptime(raw, "%d.%m.%Y %H:%M")
+        start_at = dt.isoformat()
+    except ValueError:
+        await msg.answer("❌ Неверный формат. Введите: ДД.ММ.ГГГГ ЧЧ:ММ")
+        return
+    await state.update_data(drop_start_at=start_at)
+    await state.set_state(AdminSt.add_drop_card)
+    await msg.answer(
+        "🔥 <b>Шаг 8 — Фото/видео дропа</b>\n\n"
+        "<blockquote>Отправьте фото или напишите <b>нет</b>.</blockquote>",
+        parse_mode="HTML"
+    )
+
+@router.message(AdminSt.add_drop_card, F.photo | F.video)
+async def proc_drop_card_media(msg: types.Message, state: FSMContext):
+    if msg.photo:
+        fid, mt = msg.photo[-1].file_id, 'photo'
+    else:
+        fid, mt = msg.video.file_id, 'video'
+    await state.update_data(drop_card_fid=fid, drop_card_mt=mt)
+    await _finish_add_drop(msg, state)
+
+@router.message(AdminSt.add_drop_card, F.text)
+async def proc_drop_card_skip(msg: types.Message, state: FSMContext):
+    if msg.text.strip().lower() in ('нет', 'no', '-'):
+        await state.update_data(drop_card_fid='', drop_card_mt='')
+        await _finish_add_drop(msg, state)
+    else:
+        await msg.answer("⚠️ Отправьте фото/видео или напишите «нет».")
+
+async def _finish_add_drop(msg: types.Message, state: FSMContext):
+    d = await state.get_data()
+    await state.clear()
+    did = await add_drop(
+        d.get('drop_cid', 0), d['drop_name'], d['drop_desc'], d['drop_price'],
+        d.get('drop_sizes', []), d['drop_stock'], d['drop_start_at'],
+        d.get('drop_card_fid', ''), d.get('drop_card_mt', '')
+    )
+    start_fmt = d['drop_start_at'][:16].replace('T', ' ')
+    await msg.answer(
+        f"✅ <b>Дроп добавлен!</b>\n\n"
+        f"🔥 <b>{d['drop_name']}</b>\n"
+        f"💰 {fmt_price(d['drop_price'])}\n"
+        f"⏰ Старт: {start_fmt}",
+        parse_mode="HTML", reply_markup=kb_admin_back()
+    )
+
+# ══════════════════════════════════════════════
+#  ADMIN — Редактирование сообщений бота
+# ══════════════════════════════════════════════
+BOT_MSG_KEYS_LABELS = {
+    'welcome':        '👋 Приветствие (/start)',
+    'catalog_header': '🛒 Заголовок каталога',
+    'profile_header': '👤 Заголовок профиля',
+    'support_header': '❓ Заголовок поддержки',
+    'about_header':   '🏬 О магазине',
+    'order_confirm':  '🎉 Подтверждение заказа',
+    'payment_wait':   '⏳ Ожидание оплаты',
+    'drops_header':   '🔥 Заголовок дропов',
+    'partner_header': '🤝 Партнёрская программа',
+}
+
+@router.callback_query(F.data == "adm_botmsgs")
+async def cb_adm_botmsgs(cb: types.CallbackQuery):
+    if not admin_guard(cb.from_user.id):
+        return
+    kb_rows = []
+    for key, label in BOT_MSG_KEYS_LABELS.items():
+        kb_rows.append([InlineKeyboardButton(text=label, callback_data=f"edit_botmsg_{key}")])
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_panel")])
+    try:
+        await cb.message.edit_text(
+            "💬 <b>Редактирование сообщений бота</b>\n\n"
+            "<blockquote>Выберите сообщение для редактирования:</blockquote>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
+        )
+    except Exception:
+        await cb.message.answer("💬 <b>Сообщения бота</b>", parse_mode="HTML",
+                                reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("edit_botmsg_"))
+async def cb_edit_botmsg(cb: types.CallbackQuery, state: FSMContext):
+    if not admin_guard(cb.from_user.id):
+        return
+    key   = cb.data[len("edit_botmsg_"):]
+    label = BOT_MSG_KEYS_LABELS.get(key, key)
+    current = await get_bot_msg(key)
+    await state.update_data(botmsg_key=key)
+    await state.set_state(AdminSt.bot_msg_text)
+    try:
+        await cb.message.edit_text(
+            f"✏️ <b>{label}</b>\n\n"
+            f"<blockquote>Текущее сообщение:\n<i>{current[:300]}</i></blockquote>\n\n"
+            f"Введите новый текст (HTML-разметка поддерживается).\n"
+            f"Напишите <b>сброс</b> для возврата к дефолтному.",
+            parse_mode="HTML", reply_markup=kb_back("adm_botmsgs")
+        )
+    except Exception:
+        await cb.message.answer(f"✏️ <b>{label}</b>\n\nВведите новый текст:", parse_mode="HTML")
+    await cb.answer()
+
+@router.message(AdminSt.bot_msg_text)
+async def proc_bot_msg_text(msg: types.Message, state: FSMContext):
+    d   = await state.get_data()
+    key = d.get('botmsg_key', '')
+    await state.clear()
+    raw = msg.text.strip()
+    if raw.lower() in ('сброс', 'reset'):
+        await db_run('DELETE FROM bot_messages WHERE key=$1', (key,))
+        await msg.answer("✅ Сообщение сброшено к дефолтному.", reply_markup=kb_admin_back())
+        return
+    await set_bot_msg(key, raw)
+    label = BOT_MSG_KEYS_LABELS.get(key, key)
+    await msg.answer(f"✅ <b>{label}</b> обновлено!", parse_mode="HTML", reply_markup=kb_admin_back())
 
 @router.callback_query(F.data.in_(NAV_CALLBACKS))
 async def nav_clear_state(cb: types.CallbackQuery, state: FSMContext):
