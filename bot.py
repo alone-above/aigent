@@ -226,6 +226,7 @@ class PromoApplySt(StatesGroup):
 class ComplaintSt(StatesGroup):
     order_id    = State()
     description = State()
+    file_attach = State()  # ожидание файла/документа
 
 class PartnerSt(StatesGroup):
     choose_ref   = State()
@@ -451,6 +452,9 @@ async def init_db():
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS short_id TEXT DEFAULT ''",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS note TEXT DEFAULT ''",
             "ALTER TABLE categories ADD COLUMN IF NOT EXISTS parent_id INTEGER DEFAULT 0",
+            "ALTER TABLE kaspi_payments ADD COLUMN IF NOT EXISTS buyer_note TEXT DEFAULT ''",
+            "ALTER TABLE complaints ADD COLUMN IF NOT EXISTS file_id TEXT DEFAULT ''",
+            "ALTER TABLE complaints ADD COLUMN IF NOT EXISTS file_type TEXT DEFAULT ''",
         ]:
             try:
                 await conn.execute(col_sql)
@@ -1043,10 +1047,10 @@ async def set_crypto_paid(inv_id):
 # ══════════════════════════════════════════════
 #  Kaspi-платежи
 # ══════════════════════════════════════════════
-async def save_kaspi(uid, pid, size, amount, promo_code='', discount=0):
+async def save_kaspi(uid, pid, size, amount, promo_code='', discount=0, buyer_note=''):
     return await db_insert(
-        'INSERT INTO kaspi_payments(user_id,product_id,size,amount,promo_code,discount,created_at) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',
-        (uid, pid, size, amount, promo_code, discount, datetime.now().isoformat())
+        'INSERT INTO kaspi_payments(user_id,product_id,size,amount,promo_code,discount,buyer_note,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
+        (uid, pid, size, amount, promo_code, discount, buyer_note, datetime.now().isoformat())
     )
 
 async def get_kaspi(kid):
@@ -1152,8 +1156,7 @@ def kb_admin():
         [InlineKeyboardButton(text="📋 Заказы", callback_data="adm_orders")],
         [InlineKeyboardButton(text="🎟 Промокоды", callback_data="adm_promos")],
         [InlineKeyboardButton(text="👥 Пользователи", callback_data="adm_users")],
-        [InlineKeyboardButton(text="👑 Роли", callback_data="adm_roles"),
-         InlineKeyboardButton(text="🤝 Партнёры", callback_data="adm_partners")],
+        [InlineKeyboardButton(text="🤝 Партнёры", callback_data="adm_partners")],
         [InlineKeyboardButton(text="🔥 Дропы", callback_data="adm_drops")],
         [InlineKeyboardButton(text="💬 Сообщения бота", callback_data="adm_botmsgs")],
         [InlineKeyboardButton(text="📊 Лог (HTML)", callback_data="adm_log")],
@@ -1198,6 +1201,16 @@ async def set_cmds(uid: int):
 
 def admin_guard(uid: int) -> bool:
     return uid in ADMIN_IDS
+
+async def ban_check(uid: int, answer_fn) -> bool:
+    """Returns True if user is banned (and sends a message). Use to guard handlers."""
+    if await is_banned(uid):
+        try:
+            await answer_fn("🚫 Вы заблокированы в этом боте.")
+        except Exception:
+            pass
+        return True
+    return False
 
 # ══════════════════════════════════════════════
 #  /start  /admin
@@ -1350,6 +1363,28 @@ async def cb_support_back(cb: types.CallbackQuery):
 # ══════════════════════════════════════════════
 #  ЖАЛОБЫ НА ТОВАР
 # ══════════════════════════════════════════════
+async def _complaint_ask_desc(target, oid: int, state: FSMContext, back_cd="support_back"):
+    """Общая функция: перевести в состояние описания жалобы."""
+    await state.update_data(complaint_oid=oid)
+    await state.set_state(ComplaintSt.description)
+    text = (
+        "⚠️ <b>Жалоба на товар</b>\n\n"
+        "<blockquote>Опишите проблему подробно:\n\n"
+        "• Что именно не так?\n"
+        "• Когда заметили проблему?\n\n"
+        "Ваше сообщение поможет нам решить ситуацию быстрее!</blockquote>"
+    )
+    kb = kb_back(back_cd)
+    if hasattr(target, 'edit_text'):
+        try:
+            await target.edit_text(text, parse_mode="HTML", reply_markup=kb)
+            return
+        except Exception:
+            pass
+        await target.answer(text, parse_mode="HTML", reply_markup=kb)
+    else:
+        await target(text, parse_mode="HTML", reply_markup=kb)
+
 @router.callback_query(F.data == "complaint_start")
 async def cb_complaint_start(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(ComplaintSt.order_id)
@@ -1367,39 +1402,81 @@ async def cb_complaint_start(cb: types.CallbackQuery, state: FSMContext):
                                 reply_markup=kb_back("support_back"))
     await cb.answer()
 
+@router.callback_query(F.data.startswith("complaint_order_"))
+async def cb_complaint_from_order(cb: types.CallbackQuery, state: FSMContext):
+    """Жалоба прямо из карточки заказа — номер уже известен."""
+    oid = int(cb.data.split("_")[2])
+    await _complaint_ask_desc(cb.message, oid, state, back_cd=f"myorder_{oid}")
+    await cb.answer()
+
 @router.message(ComplaintSt.order_id)
 async def proc_complaint_order(msg: types.Message, state: FSMContext):
     try:
         oid = int(msg.text.strip())
     except ValueError:
         oid = 0
-    await state.update_data(complaint_oid=oid)
-    await state.set_state(ComplaintSt.description)
-    await msg.answer(
-        "⚠️ <b>Жалоба на товар</b>\n\n"
-        "<blockquote>Шаг 2/2 — Опишите проблему подробно:\n\n"
-        "• Что именно не так?\n"
-        "• Когда заметили проблему?\n"
-        "• Есть ли фото/видео? (приложите к следующему сообщению)\n\n"
-        "Ваше сообщение поможет нам решить ситуацию быстрее!</blockquote>",
-        parse_mode="HTML",
-        reply_markup=kb_back("support_back")
-    )
+    await _complaint_ask_desc(msg.answer, oid, state, back_cd="support_back")
 
 @router.message(ComplaintSt.description)
 async def proc_complaint_desc(msg: types.Message, state: FSMContext):
     d    = await state.get_data()
     oid  = d.get('complaint_oid', 0)
-    desc = msg.text.strip() if msg.text else "[медиа без текста]"
+    desc = msg.text.strip() if msg.text else (msg.caption or "[медиа без текста]")
+
+    # Сохраняем описание, переходим к шагу прикрепления файла
+    await state.update_data(complaint_desc=desc)
+    await state.set_state(ComplaintSt.file_attach)
+    await msg.answer(
+        "📎 <b>Прикрепите файл (необязательно)</b>\n\n"
+        "<blockquote>Отправьте фото, видео, документ или ZIP-архив.\n\n"
+        "Или нажмите <b>«Пропустить»</b> если файл не нужен.</blockquote>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="⏭ Пропустить", callback_data="complaint_skip_file")
+        ]])
+    )
+
+@router.callback_query(F.data == "complaint_skip_file", ComplaintSt.file_attach)
+async def cb_complaint_skip_file(cb: types.CallbackQuery, state: FSMContext):
+    await _finish_complaint(cb.from_user, state, file_id=None, file_type=None,
+                            send_fn=cb.message.answer)
+    await cb.answer()
+
+@router.message(ComplaintSt.file_attach,
+                F.content_type.in_([ContentType.PHOTO, ContentType.VIDEO,
+                                    ContentType.DOCUMENT, ContentType.ANIMATION]))
+async def proc_complaint_file(msg: types.Message, state: FSMContext):
+    if msg.photo:
+        file_id, file_type = msg.photo[-1].file_id, 'photo'
+    elif msg.video:
+        file_id, file_type = msg.video.file_id, 'video'
+    elif msg.document:
+        file_id, file_type = msg.document.file_id, 'document'
+    elif msg.animation:
+        file_id, file_type = msg.animation.file_id, 'animation'
+    else:
+        file_id, file_type = None, None
+    await _finish_complaint(msg.from_user, state, file_id=file_id, file_type=file_type,
+                            send_fn=msg.answer)
+
+async def _finish_complaint(tg_user: types.User, state: FSMContext,
+                             file_id, file_type, send_fn):
+    d    = await state.get_data()
+    oid  = d.get('complaint_oid', 0)
+    desc = d.get('complaint_desc', '—')
     await state.clear()
 
-    user = await get_user(msg.from_user.id)
-    cid  = await create_complaint(msg.from_user.id, oid, desc)
+    user = await get_user(tg_user.id)
+    cid  = await create_complaint(tg_user.id, oid, desc)
 
-    uname = f"@{msg.from_user.username}" if msg.from_user.username else "—"
-    fname = msg.from_user.first_name or "—"
+    # Сохраняем файл если есть
+    if file_id and file_type:
+        await db_run('UPDATE complaints SET file_id=$1, file_type=$2 WHERE id=$3',
+                     (file_id, file_type, cid))
 
-    # Получаем данные заказа если указан
+    uname = f"@{tg_user.username}" if tg_user.username else "—"
+    fname = tg_user.first_name or "—"
+
     order_info = ""
     if oid > 0:
         order = await get_order(oid)
@@ -1411,41 +1488,48 @@ async def proc_complaint_desc(msg: types.Message, state: FSMContext):
                 f"💰 {fmt_price(order['price'])} | {order_status_text(order['status'])}"
             )
 
+    file_mark = f"\n📎 <b>Файл:</b> прикреплён ({file_type})" if file_id else ""
     notify_text = (
         f"⚠️ <b>ЖАЛОБА #{cid} НА ТОВАР</b>\n\n"
         f"━━━━━━━━━━━━━━━━━\n"
         f"👤 <b>Покупатель:</b> {uname} ({fname})\n"
-        f"🆔 <b>TG ID:</b> <code>{msg.from_user.id}</code>\n"
+        f"🆔 <b>TG ID:</b> <code>{tg_user.id}</code>\n"
         f"📱 <b>Телефон:</b> {user['phone'] if user else '—'}"
         f"{order_info}\n"
         f"━━━━━━━━━━━━━━━━━\n"
         f"📝 <b>Суть жалобы:</b>\n"
-        f"<blockquote>{desc[:800]}</blockquote>\n"
+        f"<blockquote>{desc[:800]}</blockquote>"
+        f"{file_mark}\n"
         f"━━━━━━━━━━━━━━━━━\n"
-        f"📞 <b>Связаться с покупателем напрямую:</b>\n"
-        f"tg://user?id={msg.from_user.id}\n"
+        f"📞 <b>Связаться:</b> tg://user?id={tg_user.id}\n"
         f"{ae('cal')} {fmt_dt()}"
     )
 
-    # Кнопка для прямого ответа покупателю
-    kb_notify = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Написать покупателю",
-                              url=f"tg://user?id={msg.from_user.id}")],
-    ])
+    kb_notify = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="💬 Написать покупателю",
+                              url=f"tg://user?id={tg_user.id}")
+    ]])
 
-    # Отправляем АДМИНУ и МЕНЕДЖЕРУ
     for notify_id in set([*ADMIN_IDS, MANAGER_ID]):
         try:
-            await bot.send_message(notify_id, notify_text,
-                                   parse_mode="HTML", reply_markup=kb_notify)
+            if file_id and file_type == 'photo':
+                await bot.send_photo(notify_id, file_id, caption=notify_text,
+                                     parse_mode="HTML", reply_markup=kb_notify)
+            elif file_id and file_type == 'video':
+                await bot.send_video(notify_id, file_id, caption=notify_text,
+                                     parse_mode="HTML", reply_markup=kb_notify)
+            elif file_id and file_type in ('document', 'animation'):
+                await bot.send_document(notify_id, file_id, caption=notify_text,
+                                        parse_mode="HTML", reply_markup=kb_notify)
+            else:
+                await bot.send_message(notify_id, notify_text,
+                                       parse_mode="HTML", reply_markup=kb_notify)
         except Exception:
             pass
 
-    # Сообщение покупателю
-    await msg.answer(
+    await send_fn(
         f"✅ <b>Жалоба #{cid} принята!</b>\n\n"
         f"<blockquote>Мы получили ваше обращение и рассмотрим его в ближайшее время.\n\n"
-        f"Если хотите связаться с продавцом напрямую через наш бот — нажмите кнопку ниже.\n\n"
         f"Обычно ответ поступает в течение 24 часов.</blockquote>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -1455,21 +1539,25 @@ async def proc_complaint_desc(msg: types.Message, state: FSMContext):
         ])
     )
 
+
 # ══════════════════════════════════════════════
 #  Reply-кнопки
 # ══════════════════════════════════════════════
 @router.message(F.text == "🛒 Купить")
 async def txt_shop(msg: types.Message):
+    if await ban_check(msg.from_user.id, msg.answer): return
     await show_catalog(msg.chat.id)
 
 @router.message(F.text == "👤 Профиль")
 async def txt_profile(msg: types.Message):
+    if await ban_check(msg.from_user.id, msg.answer): return
     await ensure_user(msg.from_user)
     user = await get_user(msg.from_user.id)
     await _send_profile(msg.from_user, user, send_fn=msg.answer)
 
 @router.message(F.text == "🏬 О магазине")
 async def txt_about(msg: types.Message):
+    if await ban_check(msg.from_user.id, msg.answer): return
     info = await get_setting("shop_info", "Информация о магазине пока не заполнена.")
     text = (f"{ae('store')} <b>О магазине</b>\n\n<blockquote>{info}</blockquote>")
     kb = InlineKeyboardMarkup(inline_keyboard=[[
@@ -1519,6 +1607,7 @@ async def cb_about_back(cb: types.CallbackQuery):
 
 @router.message(F.text == "❓ Поддержка")
 async def txt_support(msg: types.Message):
+    if await ban_check(msg.from_user.id, msg.answer): return
     await _show_support(msg.chat.id)
 
 # ══════════════════════════════════════════════
@@ -1736,6 +1825,7 @@ async def cb_myorder_detail(cb: types.CallbackQuery):
         f"━━━━━━━━━━━━━━━━━"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚠️ Пожаловаться", callback_data=f"complaint_order_{oid}")],
         [InlineKeyboardButton(text="‹ К заказам", callback_data="my_orders")],
     ])
     try:
@@ -2332,9 +2422,10 @@ async def cb_chk(cb: types.CallbackQuery):
     await reduce_stock(pid)
     bonus = await add_bonus(uid, price)
 
-    # Partner referral bonus
+    # Партнёрский бонус для ПОКУПАТЕЛЯ
     buyer = await get_user(uid)
     ref_code = buyer.get('ref_code', '') if buyer else ''
+    ref_bonus_msg = ""
     if ref_code:
         partner = await get_partner_by_ref(ref_code)
         if partner and partner['user_id'] != uid:
@@ -2342,18 +2433,35 @@ async def cb_chk(cb: types.CallbackQuery):
             try:
                 bonus_cfg = json.loads(partner['bonus_new'] if is_new else partner['bonus_repeat'])
             except Exception:
-                bonus_cfg = {"type": "percent", "value": 5}
-            ref_bonus = calc_partner_bonus(price, bonus_cfg)
-            if ref_bonus > 0:
-                await record_partner_referral(partner['user_id'], uid, is_new, ref_bonus, 0)
-                try:
-                    await bot.send_message(partner['user_id'],
-                        f"🤝 <b>Партнёрский бонус!</b>\n\nПо вашей ссылке {'новый' if is_new else 'повторный'} "
-                        f"покупатель совершил заказ.\n💰 +{fmt_price(ref_bonus)} на бонусный счёт!",
-                        parse_mode="HTML"
-                    )
-                except Exception:
-                    pass
+                bonus_cfg = {"type": "discount_percent", "value": 5}
+            # Применяем бонус к ПОКУПАТЕЛЮ
+            btype = bonus_cfg.get('type', '')
+            bval  = float(bonus_cfg.get('value', 0))
+            buyer_bonus_amount = 0.0
+            if btype == 'bonus_fixed' and bval > 0:
+                await db_run('UPDATE users SET bonus_balance=bonus_balance+$1 WHERE user_id=$2', (bval, uid))
+                _cache_invalidate(f"user:{uid}")
+                buyer_bonus_amount = bval
+                ref_bonus_msg = f"🎁 <b>Реф-бонус:</b> +{fmt_price(bval)} на бонусный счёт\n"
+            elif btype == 'cashback_x2':
+                extra = bonus
+                await db_run('UPDATE users SET bonus_balance=bonus_balance+$1 WHERE user_id=$2', (extra, uid))
+                _cache_invalidate(f"user:{uid}")
+                buyer_bonus_amount = extra
+                ref_bonus_msg = f"🎁 <b>Реф-бонус:</b> кешбэк x2 (+{fmt_price(extra)})\n"
+            # discount_percent уже был применён на этапе формирования цены (при наличии promo)
+            # Партнёр получает фиксированный процент магазина (5% по умолчанию)
+            partner_earn = round(price * 5 / 100, 0)
+            await record_partner_referral(partner['user_id'], uid, is_new, partner_earn, oid)
+            try:
+                await bot.send_message(partner['user_id'],
+                    f"🤝 <b>По вашей ссылке сделали заказ!</b>\n\n"
+                    f"{'🆕 Новый' if is_new else '🔄 Повторный'} покупатель совершил покупку.\n"
+                    f"💰 Вам начислено: <b>+{fmt_price(partner_earn)}</b>",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
 
     if promo_code:
         promo_row = await get_promo_by_code(promo_code)
@@ -2387,8 +2495,9 @@ async def cb_chk(cb: types.CallbackQuery):
         f"{promo_msg}"
         f"{ae('phone')} {user['phone']}\n"
         f"{ae('pin')} {user['default_address']}\n\n"
-        f"{ae('gift')} Кэшбэк: <b>{fmt_price(bonus)}</b> на бонусный счёт"
-        f"\n\n<blockquote>Мы свяжемся с вами для согласования доставки.</blockquote>",
+        f"{ae('gift')} Кэшбэк: <b>{fmt_price(bonus)}</b> на бонусный счёт\n"
+        f"{ref_bonus_msg}"
+        f"\n<blockquote>Мы свяжемся с вами для согласования доставки.</blockquote>",
         parse_mode="HTML", reply_markup=kb_main()
     )
     await cb.answer("✅ Готово!")
@@ -2415,7 +2524,12 @@ async def cb_pkaspi(cb: types.CallbackQuery):
         if promo:
             price, discount, _ = apply_promo_to_price(p['price'], promo)
 
-    kid = await save_kaspi(cb.from_user.id, pid, size, price, promo_code, discount)
+    # Читаем примечание покупателя из кэша и сохраняем вместе с платежом
+    note_key = f"ordernote:{cb.from_user.id}:{pid}:{size}"
+    pending_note, note_hit = _cache_get(note_key)
+    buyer_note = pending_note if note_hit and pending_note else ''
+
+    kid = await save_kaspi(cb.from_user.id, pid, size, price, promo_code, discount, buyer_note)
 
     text = (
         f"🏦 <b>Оплата через Kaspi</b>\n\n"
@@ -2464,6 +2578,10 @@ async def cb_kpaid(cb: types.CallbackQuery):
         promo_line = (f"🎟 <b>Промокод:</b> <code>{kp['promo_code']}</code>\n"
                       f"💰 <b>Скидка:</b> {fmt_price(kp.get('discount', 0))}\n")
 
+    note_line = ""
+    if kp.get('buyer_note'):
+        note_line = f"📝 <b>Примечание:</b>\n<blockquote>{kp['buyer_note']}</blockquote>\n"
+
     mgr_text = (
         f"🏦 <b>ЗАЯВКА KASPI #{kid}</b>\n\n"
         f"━━━━━━━━━━━━━━━━━\n"
@@ -2474,6 +2592,7 @@ async def cb_kpaid(cb: types.CallbackQuery):
         f"{promo_line}"
         f"{ae('phone')} <b>Телефон:</b> {user['phone'] if user else '—'}\n"
         f"{ae('pin')} <b>Адрес:</b> {user['default_address'] if user else '—'}\n"
+        f"{note_line}"
         f"{ae('cal')} {fmt_dt()}\n"
         f"━━━━━━━━━━━━━━━━━\n\n"
         f"<blockquote>Проверьте поступление перевода:</blockquote>"
@@ -2532,6 +2651,9 @@ async def cb_kapprove(cb: types.CallbackQuery):
                              kp['product_id'], size, kp['amount'], 'kaspi',
                              user['phone'] if user else '', user['default_address'] if user else '',
                              promo_code, discount)
+    # Сохраняем примечание покупателя если есть
+    if kp.get('buyer_note'):
+        await set_order_note(oid, kp['buyer_note'])
     await add_purchase(kp['user_id'], kp['product_id'], kp['amount'], 'kaspi')
     await reduce_stock(kp['product_id'])
     bonus = await add_bonus(kp['user_id'], kp['amount'])
@@ -2653,7 +2775,7 @@ async def _notify_manager_new_order(oid, uid, uname, first_name, product, size,
 # ══════════════════════════════════════════════
 #  Управление статусами заказов
 # ══════════════════════════════════════════════
-ORDER_STATUSES = ["processing", "china", "arrived", "delivered"]
+ORDER_STATUSES = ["processing", "china", "arrived", "delivered", "confirmed"]
 
 @router.callback_query(F.data.startswith("ordstatus_"))
 async def cb_ordstatus(cb: types.CallbackQuery):
@@ -2725,10 +2847,12 @@ async def proc_custom_status(msg: types.Message, state: FSMContext):
     order   = await get_order(oid)
     product = await get_product(order['product_id']) if order else None
     await set_order_status(oid, status)
+    pname = product['name'] if product else '—'
+    short = f"#{product.get('short_id', '')}" if product and product.get('short_id') else ''
     try:
         await bot.send_message(order['user_id'],
             f"{ae('truck')} <b>Статус заказа #{oid} обновлён</b>\n\n"
-            f"{ae('box')} {product['name']}  ({order['size']})\n"
+            f"{ae('box')} {pname} {short} ({order['size']})\n"
             f"🔄 <b>Новый статус:</b> {status}",
             parse_mode="HTML"
         )
@@ -2752,12 +2876,14 @@ async def cb_setordst(cb: types.CallbackQuery):
 
     await set_order_status(oid, status)
     product = await get_product(order['product_id'])
+    pname = product['name'] if product else '—'
+    short = f"#{product.get('short_id', '')}" if product and product.get('short_id') else ''
 
     try:
         if status == "delivered":
             await bot.send_message(order['user_id'],
                 f"🚚 <b>Ваш заказ #{oid} доставлен!</b>\n\n"
-                f"{ae('box')} {product['name']}  ({order['size']})\n\n"
+                f"{ae('box')} {pname} {short} ({order['size']})\n\n"
                 f"<blockquote>Пожалуйста, подтвердите получение:</blockquote>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -2768,7 +2894,7 @@ async def cb_setordst(cb: types.CallbackQuery):
         else:
             await bot.send_message(order['user_id'],
                 f"{ae('truck')} <b>Статус заказа #{oid} обновлён</b>\n\n"
-                f"{ae('box')} {product['name']}  ({order['size']})\n"
+                f"{ae('box')} {pname} {short} ({order['size']})\n"
                 f"🔄 <b>Новый статус:</b> {order_status_text(status)}",
                 parse_mode="HTML"
             )
@@ -3566,8 +3692,12 @@ async def cb_adm_user(cb: types.CallbackQuery):
     else:
         ban_btn = InlineKeyboardButton(text="🚫 Заблокировать", callback_data=f"adm_ban_{uid}")
 
+    current_role = await get_user_role(uid)
+    role_label = ROLES.get(current_role, current_role or "—")
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [ban_btn],
+        [InlineKeyboardButton(text=f"👑 Роль: {role_label}", callback_data=f"adm_role_edit_{uid}")],
         [InlineKeyboardButton(text="💬 Написать пользователю",
                               callback_data=f"adm_msguser_{uid}")],
         [InlineKeyboardButton(text="‹ Назад", callback_data="adm_users")],
@@ -4128,15 +4258,22 @@ async def cb_dprod(cb: types.CallbackQuery):
 async def cb_addprod(cb: types.CallbackQuery, state: FSMContext):
     if not admin_guard(cb.from_user.id):
         return
-    cats = await get_categories()
-    if not cats:
+    # Показываем ВСЕ категории включая подкатегории
+    all_cats = await get_all_categories()
+    if not all_cats:
         await cb.answer("Сначала создайте категорию!", show_alert=True)
         return
-    kb = [[InlineKeyboardButton(text=f"📂 {c['name']}", callback_data=f"npcat_{c['id']}")] for c in cats]
+    kb = []
+    for c in all_cats:
+        parent_mark = "  ↳ " if c.get('parent_id', 0) else ""
+        kb.append([InlineKeyboardButton(
+            text=f"📂{parent_mark}{c['name']}",
+            callback_data=f"npcat_{c['id']}"
+        )])
     kb.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_products")])
     try:
         await cb.message.edit_text(
-            "📦 <b>Новый товар</b>\n\n<blockquote>Шаг 1/9 — Выберите категорию:</blockquote>",
+            "📦 <b>Новый товар</b>\n\n<blockquote>Шаг 1/9 — Выберите категорию (↳ = подкатегория):</blockquote>",
             parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
         )
     except Exception:
@@ -4702,22 +4839,18 @@ async def cb_partner_program(cb: types.CallbackQuery):
             bonus_new    = json.loads(partner['bonus_new'])
             bonus_repeat = json.loads(partner['bonus_repeat'])
         except Exception:
-            bonus_new    = {"type": "percent", "value": 5}
-            bonus_repeat = {"type": "percent", "value": 3}
-
-        def fmt_bonus(b):
-            if b['type'] == 'percent':
-                return f"{b['value']}%"
-            return fmt_price(b['value'])
+            bonus_new    = {"type": "discount_percent", "value": 5}
+            bonus_repeat = {"type": "discount_percent", "value": 3}
 
         text = (
             f"🤝 <b>Партнёрская программа</b>\n\n"
             f"━━━━━━━━━━━━━━━━━\n"
-            f"🔗 <b>Ваша реф-ссылка:</b>\n<code>{ref_url}</code>\n\n"
+            f"🔗 <b>Ваша реф-ссылка / промокод:</b>\n<code>{ref_url}</code>\n\n"
             f"👥 <b>Приглашено:</b> {partner['total_invited']}\n"
             f"💰 <b>Заработано:</b> {fmt_price(partner['total_earned'])}\n\n"
-            f"🎁 <b>Бонус за нового покупателя:</b> {fmt_bonus(bonus_new)}\n"
-            f"🔄 <b>Бонус за повторного:</b> {fmt_bonus(bonus_repeat)}\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            f"🎁 <b>Покупатели получат (новые):</b> {_fmt_buyer_bonus(bonus_new)}\n"
+            f"🔄 <b>Покупатели получат (повторные):</b> {_fmt_buyer_bonus(bonus_repeat)}\n"
             f"━━━━━━━━━━━━━━━━━"
         )
         kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -4773,10 +4906,10 @@ async def cb_partner_autoref(cb: types.CallbackQuery, state: FSMContext):
     await cb.message.edit_text(
         f"✅ <b>Партнёрский аккаунт создан!</b>\n\n"
         f"🔗 <b>Ваша ссылка:</b>\n<code>{url}</code>\n\n"
-        f"<blockquote>Теперь настройте бонусы, которые вы будете получать за каждого приглашённого покупателя.</blockquote>",
+        f"<blockquote>Теперь настройте бонусы, которые <b>получат ваши покупатели</b> при первой и повторной покупке по вашей ссылке.</blockquote>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⚙️ Настроить бонусы", callback_data="partner_set_bonuses")],
+            [InlineKeyboardButton(text="⚙️ Настроить бонусы покупателям", callback_data="partner_set_bonuses")],
             [InlineKeyboardButton(text="‹ Профиль", callback_data="profile_view")],
         ])
     )
@@ -4787,7 +4920,7 @@ async def cb_partner_customref(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(PartnerSt.custom_ref)
     try:
         await cb.message.edit_text(
-            "✏️ <b>Введите ваш реф-код</b>\n\n"
+            "✏️ <b>Введите ваш реф-код (промокод)</b>\n\n"
             "<blockquote>Только латинские буквы и цифры, от 4 до 16 символов.\nПример: ALEX2024</blockquote>",
             parse_mode="HTML", reply_markup=kb_back("become_partner")
         )
@@ -4813,39 +4946,47 @@ async def proc_partner_customref(msg: types.Message, state: FSMContext):
         f"🔗 <b>Ваша ссылка:</b>\n<code>{url}</code>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⚙️ Настроить бонусы", callback_data="partner_set_bonuses")],
+            [InlineKeyboardButton(text="⚙️ Настроить бонусы покупателям", callback_data="partner_set_bonuses")],
             [InlineKeyboardButton(text="‹ Профиль", callback_data="profile_view")],
         ])
     )
 
-BONUS_OPTIONS_NEW = [
-    ("3% от суммы заказа", {"type": "percent", "value": 3}),
-    ("5% от суммы заказа", {"type": "percent", "value": 5}),
-    ("10% от суммы заказа", {"type": "percent", "value": 10}),
-    ("500 ₸ фиксированно", {"type": "fixed", "value": 500}),
-    ("1000 ₸ фиксированно", {"type": "fixed", "value": 1000}),
+# Бонусы, которые получат ПОКУПАТЕЛИ по реф-ссылке партнёра
+BUYER_BONUS_OPTIONS_NEW = [
+    ("Скидка 5% на первый заказ",  {"type": "discount_percent", "value": 5}),
+    ("Скидка 10% на первый заказ", {"type": "discount_percent", "value": 10}),
+    ("Скидка 15% на первый заказ", {"type": "discount_percent", "value": 15}),
+    ("Кешбэк x2 (двойной)",        {"type": "cashback_x2",      "value": 2}),
+    ("Бонус 500 ₸ на счёт",        {"type": "bonus_fixed",       "value": 500}),
 ]
-BONUS_OPTIONS_REPEAT = [
-    ("2% от суммы заказа", {"type": "percent", "value": 2}),
-    ("3% от суммы заказа", {"type": "percent", "value": 3}),
-    ("5% от суммы заказа", {"type": "percent", "value": 5}),
-    ("200 ₸ фиксированно", {"type": "fixed", "value": 200}),
-    ("500 ₸ фиксированно", {"type": "fixed", "value": 500}),
+BUYER_BONUS_OPTIONS_REPEAT = [
+    ("Скидка 3% на повторный заказ",  {"type": "discount_percent", "value": 3}),
+    ("Скидка 5% на повторный заказ",  {"type": "discount_percent", "value": 5}),
+    ("Кешбэк x2 на повторный заказ",  {"type": "cashback_x2",      "value": 2}),
+    ("Бонус 200 ₸ на счёт",           {"type": "bonus_fixed",       "value": 200}),
 ]
+
+def _fmt_buyer_bonus(b: dict) -> str:
+    t, v = b.get('type', ''), b.get('value', 0)
+    if t == 'discount_percent': return f"Скидка {v}%"
+    if t == 'cashback_x2':      return f"Кешбэк x{v}"
+    if t == 'bonus_fixed':      return fmt_price(v) + " на бонусный счёт"
+    return str(v)
 
 @router.callback_query(F.data == "partner_set_bonuses")
 async def cb_partner_set_bonuses(cb: types.CallbackQuery):
     kb_rows = []
-    for label, val in BONUS_OPTIONS_NEW:
+    for label, val in BUYER_BONUS_OPTIONS_NEW:
         kb_rows.append([InlineKeyboardButton(
             text=f"🆕 {label}",
-            callback_data=f"pbonus_new_{json.dumps(val)}"
+            callback_data=f"pbonus_new_{json.dumps(val, separators=(',', ':'))}"
         )])
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="partner_program")])
     try:
         await cb.message.edit_text(
-            "⚙️ <b>Бонус за нового покупателя</b>\n\n"
-            "<blockquote>Выберите размер бонуса который вы получите когда новый пользователь (впервые) сделает покупку по вашей ссылке:</blockquote>",
+            "⚙️ <b>Бонус для новых покупателей</b>\n\n"
+            "<blockquote>Выберите, что получат <b>новые покупатели</b> (впервые), "
+            "которые перейдут по вашей реф-ссылке и сделают заказ:</blockquote>",
             parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
         )
     except Exception:
@@ -4861,16 +5002,17 @@ async def cb_pbonus_new(cb: types.CallbackQuery):
         await cb.answer("Ошибка", show_alert=True)
         return
     kb_rows = []
-    for label, val in BONUS_OPTIONS_REPEAT:
+    for label, val in BUYER_BONUS_OPTIONS_REPEAT:
         kb_rows.append([InlineKeyboardButton(
             text=f"🔄 {label}",
-            callback_data=f"pbonus_rep_{json.dumps(val)}_{json.dumps(bonus_new)}"
+            callback_data=f"pbonus_rep_{json.dumps(val, separators=(',', ':'))}_{json.dumps(bonus_new, separators=(',', ':'))}"
         )])
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="partner_set_bonuses")])
     try:
         await cb.message.edit_text(
-            "⚙️ <b>Бонус за повторного покупателя</b>\n\n"
-            "<blockquote>Выберите бонус за покупки пользователей, которые уже покупали ранее:</blockquote>",
+            "⚙️ <b>Бонус для повторных покупателей</b>\n\n"
+            "<blockquote>Выберите, что получат <b>повторные покупатели</b>, "
+            "которые снова делают заказ по вашей ссылке:</blockquote>",
             parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
         )
     except Exception:
@@ -4880,25 +5022,32 @@ async def cb_pbonus_new(cb: types.CallbackQuery):
 @router.callback_query(F.data.startswith("pbonus_rep_"))
 async def cb_pbonus_rep(cb: types.CallbackQuery):
     raw = cb.data[len("pbonus_rep_"):]
-    # format: {repeat_json}_{new_json}
-    idx = raw.rfind("_")
-    if idx == -1:
-        await cb.answer("Ошибка", show_alert=True)
-        return
+    # Разбираем два JSON-объекта: repeat_json _ new_json
+    # Ищем границу между двумя JSON с конца
     try:
-        bonus_repeat = json.loads(raw[:idx])
-        bonus_new    = json.loads(raw[idx+1:])
+        brace_depth = 0
+        split_pos = -1
+        for i in range(len(raw) - 1, -1, -1):
+            if raw[i] == '}': brace_depth += 1
+            if raw[i] == '{': brace_depth -= 1
+            if brace_depth == 0 and i > 0 and raw[i-1] == '_':
+                split_pos = i - 1
+                break
+        if split_pos == -1:
+            raise ValueError("split not found")
+        bonus_repeat = json.loads(raw[:split_pos])
+        bonus_new    = json.loads(raw[split_pos+1:])
     except Exception:
-        await cb.answer("Ошибка", show_alert=True)
+        await cb.answer("Ошибка разбора данных", show_alert=True)
         return
     uid = cb.from_user.id
     await update_partner_bonuses(uid, bonus_new, bonus_repeat)
-    def fmt_b(b):
-        return f"{b['value']}%" if b['type'] == 'percent' else fmt_price(b['value'])
     await cb.message.edit_text(
-        f"✅ <b>Бонусы сохранены!</b>\n\n"
-        f"🆕 Новый покупатель: <b>{fmt_b(bonus_new)}</b>\n"
-        f"🔄 Повторный покупатель: <b>{fmt_b(bonus_repeat)}</b>",
+        f"✅ <b>Настройки сохранены!</b>\n\n"
+        f"🆕 <b>Новым покупателям:</b> {_fmt_buyer_bonus(bonus_new)}\n"
+        f"🔄 <b>Повторным покупателям:</b> {_fmt_buyer_bonus(bonus_repeat)}\n\n"
+        f"<blockquote>Эти бонусы будут применяться автоматически для всех, "
+        f"кто пришёл по вашей реф-ссылке.</blockquote>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="‹ Партнёрская программа", callback_data="partner_program")
@@ -5024,7 +5173,12 @@ async def cb_setrole(cb: types.CallbackQuery):
     except Exception:
         pass
     await cb.answer(f"✅ Роль {rlabel} назначена", show_alert=True)
-    await cb_adm_roles(cb)
+    # Возвращаем на карточку пользователя
+    fake = types.CallbackQuery(
+        id=cb.id, from_user=cb.from_user, message=cb.message,
+        chat_instance=cb.chat_instance, data=f"adm_user_{uid}"
+    )
+    await cb_adm_user(fake)
 
 @router.callback_query(F.data.startswith("adm_role_edit_"))
 async def cb_adm_role_edit(cb: types.CallbackQuery):
@@ -5041,7 +5195,7 @@ async def cb_adm_role_edit(cb: types.CallbackQuery):
             text=f"{mark}{role_label}",
             callback_data=f"setrole_{uid}_{role_key}"
         )])
-    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_roles")])
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад к пользователю", callback_data=f"adm_user_{uid}")])
     try:
         await cb.message.edit_text(
             f"👤 <b>{uname}</b>\nТекущая роль: {ROLES.get(current_role, current_role)}\n\n"
