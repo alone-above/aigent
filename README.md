@@ -17,7 +17,7 @@
 
 2. ТОКЕН CRYPTOBOT (CRYPTOBOT_TOKEN):
    • Найдите бота @CryptoBot в Telegram
-   • Нажмите "Crypto Pay"
+   • Нажмите "Crypto Pay"12
    • Нажмите "Create App"
    • Придумайте название приложения
    • Скопируйте API Token
