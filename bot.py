@@ -1,12 +1,8 @@
 """
-╔══════════════════════════════════════════════════════════════════╗
-║  ALONE ABOVE — ECOSYSTEM BOT v8.0                               ║
-║  Магазин одежды · Шымкент, Казахстан                            ║
-║  aiogram 3.x  |  asyncpg (PostgreSQL)  |  CryptoPay             ║
-║                                                                  ║
-║  ✦ Экосистемный редизайн: VIP-статусы, достижения,              ║
-║    образ дня, Style DNA, таблица лидеров                         ║
-╚══════════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════╗
+║  SHOPBOT — Магазин одежды / Шымкент, Казахстан      ║
+║  aiogram 3.x  |  asyncpg (PostgreSQL)  |  CryptoPay ║
+╚══════════════════════════════════════════════════════╝
 """
 
 import asyncio
@@ -158,6 +154,7 @@ AE = {
     "pin":      '<tg-emoji emoji-id="5983099415689171511">📍</tg-emoji>',
     "user":     '<tg-emoji emoji-id="5373012449597335010">👤</tg-emoji>',
     "promo":    '<tg-emoji emoji-id="5368324170671202286">🎟</tg-emoji>',
+    # Новые
     "heart":    '<tg-emoji emoji-id="5449505950283078474">❤️</tg-emoji>',
     "heart_w":  '<tg-emoji emoji-id="5451714942157724312">🤍</tg-emoji>',
     "fire":     '<tg-emoji emoji-id="5420315771991497307">🔥</tg-emoji>',
@@ -191,55 +188,8 @@ AE = {
     "mobile":   '<tg-emoji emoji-id="5407025283456835913">📱</tg-emoji>',
     "msg":      '<tg-emoji emoji-id="5472019095106886003">💌</tg-emoji>',
     "rainbow":  '<tg-emoji emoji-id="5427042798878610107">🌈</tg-emoji>',
-    # ── v8.0 Ecosystem additions ───────────────
-    "outfit":   '<tg-emoji emoji-id="5380056101473492248">👗</tg-emoji>',
-    "dna":      '<tg-emoji emoji-id="5373012449597335010">🧬</tg-emoji>',
-    "thunder":  '<tg-emoji emoji-id="5471652170059074952">⚡</tg-emoji>',
-    "feed":     '<tg-emoji emoji-id="5465300082628763143">📡</tg-emoji>',
-    "globe":    '<tg-emoji emoji-id="5870718740236079262">🌍</tg-emoji>',
-    "palette":  '<tg-emoji emoji-id="5373012449597335010">🎨</tg-emoji>',
 }
 def ae(k): return AE.get(k, "")
-
-# ── Утилиты дизайна ────────────────────────────
-def divider(style: str = "thin") -> str:
-    styles = {
-        "thin":    "─" * 17,
-        "double":  "═" * 17,
-        "dots":    "· · · · · · · · ·",
-        "stars":   "✦ ✧ ✦ ✧ ✦ ✧ ✦ ✧ ✦",
-        "elegant": "▸ ▸ ▸ ▸ ▸ ▸ ▸ ▸ ▸",
-    }
-    return styles.get(style, "─" * 17)
-
-# ── VIP-статусы ────────────────────────────────
-VIP_LEVELS = [
-    (0,       "🌙 Newcomer",   "Добро пожаловать в семью"),
-    (1,       "🥉 Bronze",     "Первые шаги в стиле"),
-    (5000,    "🥈 Silver",     "Ты знаешь толк в одежде"),
-    (15000,   "🥇 Gold",       "Золотой покупатель"),
-    (40000,   "💎 Platinum",   "Платиновый ценитель"),
-    (100000,  "👑 Diamond",    "Легенда Alone Above"),
-]
-
-def get_vip_status(total_spent: float) -> tuple:
-    current_idx = 0
-    for i, (threshold, name, desc) in enumerate(VIP_LEVELS):
-        if total_spent >= threshold:
-            current_idx = i
-    current = VIP_LEVELS[current_idx]
-    next_lvl = VIP_LEVELS[current_idx + 1] if current_idx + 1 < len(VIP_LEVELS) else None
-    if next_lvl:
-        remaining = next_lvl[0] - total_spent
-        if next_lvl[0] - current[0] > 0:
-            progress_pct = int((total_spent - current[0]) / (next_lvl[0] - current[0]) * 100)
-        else:
-            progress_pct = 100
-        progress_bar = "█" * (progress_pct // 10) + "░" * (10 - progress_pct // 10)
-        progress_text = f"{progress_bar} {progress_pct}%\nДо {next_lvl[1]}: {fmt_price(remaining)}"
-    else:
-        progress_text = "★★★★★ Максимальный статус!"
-    return current[1], current[2], progress_text
 
 # ══════════════════════════════════════════════
 #  FSM-состояния
@@ -1316,32 +1266,14 @@ def order_status_text(status: str) -> str:
 #  Клавиатуры
 # ══════════════════════════════════════════════
 def kb_main():
-    """Главное инлайн-меню экосистемы v8.0"""
+    """Главное инлайн-меню. Больше нет Reply-клавиатуры — всё через инлайн."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Каталог",    callback_data="shop",
-                                 icon_custom_emoji_id="5373052667671093676"),
-            InlineKeyboardButton(text="Дропы",      callback_data="drops_menu",
-                                 icon_custom_emoji_id="5420315771991497307"),
-        ],
-        [
-            InlineKeyboardButton(text="Корзина",    callback_data="my_cart",
-                                 icon_custom_emoji_id="5431499171045581032"),
-            InlineKeyboardButton(text="Избранное",  callback_data="my_wishlist",
-                                 icon_custom_emoji_id="5449505950283078474"),
-        ],
-        [
-            InlineKeyboardButton(text="Профиль",    callback_data="profile_view",
-                                 icon_custom_emoji_id="5870994129244131212"),
-            InlineKeyboardButton(text="Образ дня",  callback_data="outfit_of_day",
-                                 icon_custom_emoji_id="5380056101473492248"),
-        ],
-        [
-            InlineKeyboardButton(text="О магазине", callback_data="about",
-                                 icon_custom_emoji_id="5873147866364514353"),
-            InlineKeyboardButton(text="Поддержка",  callback_data="support",
-                                 icon_custom_emoji_id="5467666648263564704"),
-        ],
+        [InlineKeyboardButton(text="Каталог",      callback_data="shop", icon_custom_emoji_id="5373052667671093676"),
+         InlineKeyboardButton(text="Профиль",      callback_data="profile_view", icon_custom_emoji_id="5870994129244131212")],
+        [InlineKeyboardButton(text="Корзина",      callback_data="my_cart", icon_custom_emoji_id="5431499171045581032"),
+         InlineKeyboardButton(text="Избранное",   callback_data="my_wishlist", icon_custom_emoji_id="5449505950283078474")],
+        [InlineKeyboardButton(text="О магазине",  callback_data="about", icon_custom_emoji_id="5873147866364514353"),
+         InlineKeyboardButton(text="Поддержка", callback_data="support", icon_custom_emoji_id="5467666648263564704")],
     ])
 
 def kb_back(cd="main"):
@@ -1351,46 +1283,19 @@ def kb_back(cd="main"):
 
 def kb_admin():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📊 Статистика", callback_data="adm_stats",
-                                 icon_custom_emoji_id="5870921681735781843"),
-            InlineKeyboardButton(text="📋 Лог", callback_data="adm_log",
-                                 icon_custom_emoji_id="5870930636742595124"),
-        ],
-        [
-            InlineKeyboardButton(text="📦 Товары", callback_data="adm_products",
-                                 icon_custom_emoji_id="5884479287171485878"),
-            InlineKeyboardButton(text="📁 Категории", callback_data="adm_cats",
-                                 icon_custom_emoji_id="5870528606328852614"),
-        ],
-        [
-            InlineKeyboardButton(text="🔥 Дропы", callback_data="adm_drops",
-                                 icon_custom_emoji_id="5420315771991497307"),
-            InlineKeyboardButton(text="🎟 Промокоды", callback_data="adm_promos",
-                                 icon_custom_emoji_id="5904462880941545555"),
-        ],
-        [
-            InlineKeyboardButton(text="🧾 Заказы", callback_data="adm_orders",
-                                 icon_custom_emoji_id="5890937706803894250"),
-            InlineKeyboardButton(text="👥 Юзеры", callback_data="adm_users",
-                                 icon_custom_emoji_id="5870772616305839506"),
-        ],
-        [
-            InlineKeyboardButton(text="📨 Рассылка", callback_data="adm_broadcast",
-                                 icon_custom_emoji_id="6039422865189638057"),
-            InlineKeyboardButton(text="🤝 Партнёры", callback_data="adm_partners",
-                                 icon_custom_emoji_id="5769289093221454192"),
-        ],
-        [
-            InlineKeyboardButton(text="🖼 Медиа", callback_data="adm_media",
-                                 icon_custom_emoji_id="6035128606563241721"),
-            InlineKeyboardButton(text="💬 Сообщения", callback_data="adm_botmsgs",
-                                 icon_custom_emoji_id="5465300082628763143"),
-        ],
-        [
-            InlineKeyboardButton(text="⚙️ Настройки", callback_data="adm_settings",
-                                 icon_custom_emoji_id="5870982283724328568"),
-        ],
+        [InlineKeyboardButton(text="Статистика", callback_data="adm_stats", icon_custom_emoji_id="5870921681735781843")],
+        [InlineKeyboardButton(text="🖼 Медиа", callback_data="adm_media", icon_custom_emoji_id="6035128606563241721"),
+         InlineKeyboardButton(text="📨 Рассылка", callback_data="adm_broadcast", icon_custom_emoji_id="6039422865189638057")],
+        [InlineKeyboardButton(text="Товары", callback_data="adm_products", icon_custom_emoji_id="5884479287171485878"),
+         InlineKeyboardButton(text="📁 Категории", callback_data="adm_cats", icon_custom_emoji_id="5870528606328852614")],
+        [InlineKeyboardButton(text="Заказы", callback_data="adm_orders", icon_custom_emoji_id="5890937706803894250")],
+        [InlineKeyboardButton(text="🎟 Промокоды", callback_data="adm_promos", icon_custom_emoji_id="5904462880941545555")],
+        [InlineKeyboardButton(text="👥 Пользователи", callback_data="adm_users", icon_custom_emoji_id="5870772616305839506")],
+        [InlineKeyboardButton(text="Партнёры", callback_data="adm_partners", icon_custom_emoji_id="5769289093221454192")],
+        [InlineKeyboardButton(text="🔥 Дропы", callback_data="adm_drops", icon_custom_emoji_id="5420315771991497307")],
+        [InlineKeyboardButton(text="Сообщения бота", callback_data="adm_botmsgs", icon_custom_emoji_id="5465300082628763143")],
+        [InlineKeyboardButton(text="📊 Лог (HTML)", callback_data="adm_log", icon_custom_emoji_id="5870930636742595124")],
+        [InlineKeyboardButton(text="Настройки", callback_data="adm_settings", icon_custom_emoji_id="5870982283724328568")],
     ])
 
 def kb_admin_back():
@@ -1479,18 +1384,9 @@ async def cmd_start(msg: types.Message, state: FSMContext):
     await log_event("start", msg.from_user.id)
     welcome_text = await get_bot_msg('welcome')
     text = welcome_text.replace('{shop_name}', SHOP_NAME)
-    
-    # VIP-статус пользователя
-    user_data = await get_user(msg.from_user.id)
-    total_spent = user_data.get('total_spent', 0) if user_data else 0
-    vip_title, _, _ = get_vip_status(total_spent)
-    fname = msg.from_user.first_name or "друг"
-    
     full_text = (
-        f"✦ <b>{SHOP_NAME.upper()}</b> ✦\n\n"
-        f"<blockquote>Привет, <b>{fname}</b>! 👋\n\n"
-        f"Ваш статус: <b>{vip_title}</b>\n\n"
-        f"{ae('down')} {text}</blockquote>"
+        f"{ae('sparkle')} <b>{SHOP_NAME}</b>\n\n"
+        f"<blockquote>{ae('down')} {text}</blockquote>"
     )
     # Удаляем Reply-клавиатуру если была, показываем инлайн
     await msg.answer("‌", reply_markup=ReplyKeyboardRemove())  # невидимый символ
@@ -1506,15 +1402,9 @@ async def cmd_admin(msg: types.Message, state: FSMContext):
 @router.callback_query(F.data == "main")
 async def cb_main(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    user_data = await get_user(cb.from_user.id)
-    total_spent = user_data.get('total_spent', 0) if user_data else 0
-    vip_title, _, _ = get_vip_status(total_spent)
-    fname = cb.from_user.first_name or "друг"
     text = (
-        f"✦ <b>{SHOP_NAME.upper()}</b> ✦\n\n"
-        f"<blockquote>Привет, <b>{fname}</b>! 👋\n"
-        f"Статус: <b>{vip_title}</b>\n\n"
-        f"{ae('down')} Выберите раздел:</blockquote>"
+        f"{ae('sparkle')} <b>{SHOP_NAME}</b>\n\n"
+        f"<blockquote>{ae('down')} Выберите нужный раздел:</blockquote>"
     )
     try:
         await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb_main())
@@ -1564,38 +1454,17 @@ async def cb_agree_terms(cb: types.CallbackQuery):
 #  Поддержка
 # ══════════════════════════════════════════════
 async def _show_support(chat_id: int):
-    text = (
-        f"💬 <b>ПОДДЕРЖКА</b>\n"
-        f"{divider('dots')}\n\n"
-        f"<blockquote>Мы работаем каждый день и отвечаем\n"
-        f"в среднем в течение <b>15 минут</b>.\n\n"
-        f"🕐 09:00 – 22:00 (Шымкент, UTC+5)</blockquote>\n\n"
-        f"{divider()}\n\n"
-        f"Выберите нужный раздел:"
-    )
+    text = (f"{ae('support')} <b>Поддержка</b>\n\n"
+            f"<blockquote>По любым вопросам пишите нашему менеджеру или в службу поддержки.</blockquote>")
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Написать в поддержку",
-                              icon_custom_emoji_id="5465300082628763143",
+        [InlineKeyboardButton(text="Написать в поддержку", icon_custom_emoji_id="5465300082628763143",
                               url=f"https://t.me/{SUPPORT_USERNAME.lstrip('@')}")],
-        [
-            InlineKeyboardButton(text="👤 Менеджер",
-                                 url="https://t.me/AloneAboveManager",
-                                 icon_custom_emoji_id="5870994129244131212"),
-            InlineKeyboardButton(text="📞 Контакты", callback_data="support_contacts",
-                                 icon_custom_emoji_id="5467539229468793355"),
-        ],
-        [InlineKeyboardButton(text="⚠️ Жалоба на заказ", callback_data="complaint_start",
-                              icon_custom_emoji_id="5870657884844462243")],
-        [
-            InlineKeyboardButton(text="📄 Оферта",
-                                 url="https://teletype.in/@aloneabove/R6n3kZPT77z",
-                                 icon_custom_emoji_id="5870528606328852614"),
-            InlineKeyboardButton(text="🔒 Политика",
-                                 url="https://teletype.in/@aloneabove/cC0sM1BcefC",
-                                 icon_custom_emoji_id="6037249452824072506"),
-        ],
-        [InlineKeyboardButton(text="‹ Главное меню", callback_data="main",
-                              icon_custom_emoji_id="5873147866364514353")],
+        [InlineKeyboardButton(text="Контакты", callback_data="support_contacts", icon_custom_emoji_id="5467539229468793355")],
+        [InlineKeyboardButton(text="Пожаловаться на товар", callback_data="complaint_start", icon_custom_emoji_id="5870657884844462243")],
+        [InlineKeyboardButton(text="Публичная оферта", url="https://teletype.in/@aloneabove/R6n3kZPT77z", icon_custom_emoji_id="5870528606328852614")],
+        [InlineKeyboardButton(text="Политика конфиденциальности", url="https://teletype.in/@aloneabove/cC0sM1BcefC", icon_custom_emoji_id="6037249452824072506")],
+        [InlineKeyboardButton(text="Пользовательское соглашение", url="https://teletype.in/@aloneabove/L8aD4zXVy6W", icon_custom_emoji_id="5870528606328852614")],
+        [InlineKeyboardButton(text="Наш сайт / магазин", url="https://t.me/alone_above_bot/shop", icon_custom_emoji_id="5769289093221454192")],
     ])
     await send_media(chat_id, text, "support_menu", kb)
 
@@ -2232,58 +2101,16 @@ async def cb_wish_rm(cb: types.CallbackQuery):
 @router.callback_query(F.data == "about")
 async def cb_about(cb: types.CallbackQuery):
     if await ban_check(cb.from_user.id, cb.message.answer): return
-    info = await get_setting("shop_info", "")
-    
-    about_text = (
-        f"✦ <b>ALONE ABOVE</b> ✦\n"
-        f"<i>Шымкент, Казахстан</i>\n"
-        f"{divider('elegant')}\n\n"
-        f"<b>Мы — не просто магазин.</b>\n\n"
-        f"Alone Above — это экосистема стиля для тех,\n"
-        f"кто знает, чего хочет. Собираем лучшие вещи\n"
-        f"напрямую из Азии и мировых брендов.\n\n"
-        f"{divider()}\n\n"
-        f"🏭 <b>Откуда вещи?</b>\n"
-        f"Напрямую с производств Китая, Кореи, Европы.\n"
-        f"Без посредников — только качество.\n\n"
-        f"⚡ <b>Почему мы?</b>\n"
-        f"• Честные цены без накруток\n"
-        f"• Реальные фото товаров\n"
-        f"• Кэшбэк {CASHBACK_PERCENT:.0f}% с каждой покупки\n"
-        f"• Exclusive дропы только в боте\n"
-        f"• CryptoBot и Kaspi — платишь как удобно\n\n"
-        f"💎 <b>VIP-клубы</b>\n"
-        f"🌙 Newcomer → 🥉 Bronze → 🥈 Silver\n"
-        f"→ 🥇 Gold → 💎 Platinum → 👑 Diamond\n\n"
-        f"{divider('stars')}\n\n"
-        f"<blockquote>«Стиль — это способ сказать,\n"
-        f"кто ты есть, без слов.»</blockquote>"
-    )
-    if info:
-        about_text += f"\n\n{divider()}\n{info}"
-    
+    info = await get_setting("shop_info", "Информация о магазине пока не заполнена.")
+    text = f"{ae('store')} <b>О магазине</b>\n\n<blockquote>{info}</blockquote>"
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🤝 Партнёрство", callback_data="partnership",
-                                 icon_custom_emoji_id="5769289093221454192"),
-            InlineKeyboardButton(text="📞 Контакты", callback_data="support_contacts",
-                                 icon_custom_emoji_id="5467539229468793355"),
-        ],
-        [
-            InlineKeyboardButton(text="📢 Реклама", callback_data="ad_warning",
-                                 icon_custom_emoji_id="6039422865189638057"),
-            InlineKeyboardButton(text="🌐 Наш сайт", url="https://t.me/alone_above_bot/shop",
-                                 icon_custom_emoji_id="5870718740236079262"),
-        ],
-        [
-            InlineKeyboardButton(text="‹ Главное меню", callback_data="main",
-                                 icon_custom_emoji_id="5873147866364514353"),
-        ],
+        [InlineKeyboardButton(text="Партнёрство", callback_data="partnership", icon_custom_emoji_id="5769289093221454192")],
+        [InlineKeyboardButton(text="‹ Главное меню", callback_data="main", icon_custom_emoji_id="5873147866364514353")],
     ])
     try:
-        await cb.message.edit_text(about_text, parse_mode="HTML", reply_markup=kb)
+        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
     except Exception:
-        await send_media(cb.from_user.id, about_text, "about_menu", kb)
+        await send_media(cb.from_user.id, text, "about_menu", kb)
     await cb.answer()
 
 @router.callback_query(F.data == "support")
@@ -2364,75 +2191,36 @@ async def txt_support(msg: types.Message):
 # ══════════════════════════════════════════════
 def _profile_text(tg_user: types.User, user, role: str = 'buyer') -> str:
     phone   = user['phone'] if user['phone'] else '— не указан'
-    address = (user['default_address'][:30] + '…') if user.get('default_address') and len(user['default_address']) > 30 else (user.get('default_address') or '— не указан')
+    address = user['default_address'] if user['default_address'] else '— не указан'
     uname   = f"@{tg_user.username}" if tg_user.username else "— не указан"
     role_label = ROLES.get(role, role)
-    total_spent = user.get('total_spent', 0)
-    vip_title, vip_desc, vip_progress = get_vip_status(total_spent)
-
-    # Регистрация
-    try:
-        from datetime import datetime as _dt
-        reg_dt = _dt.fromisoformat(user.get('registered_at', ''))
-        days_with_us = (_dt.now() - reg_dt).days
-        reg_s = reg_dt.strftime("%d.%m.%Y")
-        days_s = f"{days_with_us} дн."
-    except Exception:
-        reg_s = user.get('registered_at', '—')[:10]
-        days_s = "—"
-
     return (
-        f"👤 <b>МОЙ ПРОФИЛЬ</b>\n"
-        f"<i>{role_label}</i>\n"
-        f"{divider('elegant')}\n\n"
-        f"<b>{vip_title}</b>\n"
-        f"<i>{vip_desc}</i>\n"
-        f"<code>{vip_progress}</code>\n\n"
-        f"{divider()}\n\n"
-        f"🆔 <b>ID:</b>  <code>{tg_user.id}</code>\n"
-        f"💬 <b>Username:</b>  {uname}\n"
-        f"📱 <b>Телефон:</b>  <code>{phone}</code>\n"
-        f"📍 <b>Адрес:</b>  <i>{address}</i>\n\n"
-        f"{divider()}\n\n"
-        f"🛍 <b>Заказов:</b>  <b>{user['total_purchases']}</b>\n"
-        f"💰 <b>Потрачено:</b>  <b>{fmt_price(user['total_spent'])}</b>\n"
-        f"🎁 <b>Бонусов:</b>  <code>{fmt_price(user['bonus_balance'])}</code>\n"
-        f"📅 <b>С нами:</b>  {days_s} (с {reg_s})\n"
-        f"{divider('dots')}"
+        f"{ae('user')} <b>Профиль</b>\n\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"🆔 <b>ID:</b> <code>{tg_user.id}</code>\n"
+        f"{ae('sparkle')} <b>Имя:</b> {tg_user.first_name or '—'}\n"
+        f"{ae('chat')} <b>Username:</b> {uname}\n"
+        f"{ae('crown')} <b>Роль:</b> {role_label}\n\n"
+        f"{ae('phone')} <b>Телефон:</b> <code>{phone}</code>\n"
+        f"{ae('pin')} <b>Адрес доставки:</b>\n  <i>{address}</i>\n\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"{ae('cart')} <b>Заказов:</b> {user['total_purchases']}\n"
+        f"{ae('cash')} <b>Потрачено:</b> {fmt_price(user['total_spent'])}\n"
+        f"{ae('coin')} <b>Бонусный баланс:</b> {fmt_price(user['bonus_balance'])}\n"
+        f"{ae('cal')} <b>Регистрация:</b> {user['registered_at'][:10]}\n"
+        f"━━━━━━━━━━━━━━━━━"
     )
 
 def _profile_kb(cart_cnt: int = 0, wish_cnt: int = 0) -> InlineKeyboardMarkup:
-    cart_label = "🛒 Корзина" + (f" ({cart_cnt})" if cart_cnt else "")
-    wish_label = "❤️ Избранное" + (f" ({wish_cnt})" if wish_cnt else "")
+    cart_label = "Корзина" + (f" ({cart_cnt})" if cart_cnt else "")
+    wish_label = "Избранное" + (f" ({wish_cnt})" if wish_cnt else "")
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text=cart_label,  callback_data="my_cart",
-                                 icon_custom_emoji_id="5431499171045581032"),
-            InlineKeyboardButton(text=wish_label,  callback_data="my_wishlist",
-                                 icon_custom_emoji_id="5449505950283078474"),
-        ],
-        [
-            InlineKeyboardButton(text="📦 Мои заказы", callback_data="my_orders",
-                                 icon_custom_emoji_id="5890937706803894250"),
-            InlineKeyboardButton(text="🏆 Рейтинг", callback_data="leaderboard",
-                                 icon_custom_emoji_id="5409008750893734809"),
-        ],
-        [
-            InlineKeyboardButton(text="✏️ Телефон", callback_data="profile_phone",
-                                 icon_custom_emoji_id="5467539229468793355"),
-            InlineKeyboardButton(text="📍 Адрес",   callback_data="profile_address",
-                                 icon_custom_emoji_id="6042011682497106307"),
-        ],
-        [
-            InlineKeyboardButton(text="🤝 Партнёрство", callback_data="partner_program",
-                                 icon_custom_emoji_id="5769289093221454192"),
-            InlineKeyboardButton(text="🧬 Style DNA",   callback_data="style_dna",
-                                 icon_custom_emoji_id="5373012449597335010"),
-        ],
-        [
-            InlineKeyboardButton(text="‹ Главное меню", callback_data="main",
-                                 icon_custom_emoji_id="5873147866364514353"),
-        ],
+        [InlineKeyboardButton(text=cart_label,  callback_data="my_cart",      icon_custom_emoji_id="5431499171045581032"),
+         InlineKeyboardButton(text=wish_label,  callback_data="my_wishlist",  icon_custom_emoji_id="5449505950283078474")],
+        [InlineKeyboardButton(text="Телефон", callback_data="profile_phone", icon_custom_emoji_id="5467539229468793355"),
+         InlineKeyboardButton(text="Адрес",     callback_data="profile_address", icon_custom_emoji_id="6042011682497106307")],
+        [InlineKeyboardButton(text="Мои заказы",         callback_data="my_orders", icon_custom_emoji_id="5431499171045581032")],
+        [InlineKeyboardButton(text="Партнёрская программа", callback_data="partner_program", icon_custom_emoji_id="5769289093221454192")],
     ])
 
 async def _send_profile(tg_user: types.User, user, send_fn=None, edit_msg=None):
@@ -2746,44 +2534,40 @@ async def cb_prod(cb: types.CallbackQuery):
     sizes   = parse_sizes(p)
     sizes_s = "  ".join(sizes) if sizes else "—"
     stock   = p['stock']
-    if stock > 0 and stock <= 3:
-        stock_s = f"⚡ Последние {stock} шт.!"
-    elif stock > 0:
-        stock_s = f"✅ В наличии ({stock} шт.)"
-    else:
-        stock_s = "❌ Нет в наличии"
+    stock_s = (f"✅ В наличии ({stock} шт.)" if stock > 0 else "❌ Нет в наличии")
 
     # Средний рейтинг
     avg_rating  = await get_avg_rating(pid)
     rev_count   = await get_review_count(pid)
     stars_full  = int(avg_rating)
     stars_empty = 5 - stars_full
+    rating_s = ""
     if rev_count > 0:
         rating_s = "⭐" * stars_full + "☆" * stars_empty + f"  {avg_rating}/5 ({rev_count} отзывов)"
     else:
-        rating_s = "☆☆☆☆☆  Нет отзывов — будьте первым!"
+        rating_s = "☆☆☆☆☆  Нет отзывов"
 
     short_id_s = f"  <code>#{p.get('short_id','')}</code>" if p.get('short_id') else ""
 
     seller_block = ""
     if p['seller_phone'] or p['seller_username']:
-        seller_block = f"\n{divider('dots')}\n\n🏪 <b>Продавец:</b>\n"
+        seller_block = "━━━━━━━━━━━━━━━━━\n"
         if p['seller_phone']:
-            seller_block += f"  📱 <code>{p['seller_phone']}</code>\n"
+            seller_block += f"{ae('phone')} <b>Продавец:</b> <code>{p['seller_phone']}</code>\n"
         if p['seller_username']:
             un = p['seller_username'].lstrip('@')
-            seller_block += f"  💬 @{un}\n"
+            seller_block += f"💬 <b>Telegram:</b> @{un}\n"
 
     text = (
-        f"✦ <b>{p['name'].upper()}</b>{short_id_s}\n\n"
+        f"{ae('sparkle')} <b>{p['name']}</b>{short_id_s}\n\n"
         f"<blockquote>{p['description']}</blockquote>\n\n"
-        f"{divider('elegant')}\n\n"
-        f"⭐ {rating_s}\n"
-        f"💰 <b>Цена:</b>  <code>{fmt_price(p['price'])}</code>\n"
-        f"📐 <b>Размеры:</b>  <code>{sizes_s}</code>\n"
-        f"{'⚡' if 0 < stock <= 3 else ('✅' if stock > 0 else '❌')} <b>Статус:</b>  {stock_s}\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"{ae('star')} {rating_s}\n"
+        f"{ae('cash')} <b>Цена:</b>  <code>{fmt_price(p['price'])}</code>\n"
+        f"{ae('size')} <b>Размеры:</b>  {sizes_s}\n"
+        f"{ae('ok') if stock > 0 else ae('no')} <b>Статус:</b>  {stock_s}\n"
         f"{seller_block}"
-        f"\n{divider()}"
+        f"━━━━━━━━━━━━━━━━━"
     )
 
     try:
@@ -3502,21 +3286,19 @@ async def cb_kapprove(cb: types.CallbackQuery):
     if promo_code:
         promo_msg = f"🎟 Промокод: <code>{promo_code}</code>\n"
     if discount > 0:
-        promo_msg += f"💰 Скидка: {fmt_price(discount)}\n"
+        promo_msg += f"{ae('cash')} Скидка: {fmt_price(discount)}\n"
 
     try:
         await bot.send_message(kp['user_id'],
-            f"🎉 <b>ЗАКАЗ ОФОРМЛЕН!</b>\n\n"
-            f"{divider('stars')}\n\n"
-            f"📋 Заказ <b>#{oid}</b>\n\n"
-            f"  👗 {product['name']}  ({size})\n"
-            f"  💰 Сумма: <code>{fmt_price(kp['amount'])}</code>\n"
-            f"  {promo_msg}"
-            f"  🎁 Кэшбэк начислен: <b>+{fmt_price(bonus)}</b>\n\n"
-            f"{divider()}\n\n"
-            f"<blockquote>📡 Следите за статусом заказа в разделе\n"
-            f"«Профиль → Заказы».\n\n"
-            f"Мы уведомим вас при каждом обновлении! 🔔</blockquote>",
+            f"{ae('confetti')} <b>Оплата подтверждена!</b>\n"
+            f"{ae('note')} <b>Заказ #{oid} оформлен</b>\n\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            f"{ae('bag')} {product['name']}  ({size})\n"
+            f"{ae('cash')} {fmt_price(kp['amount'])}\n"
+            f"{promo_msg}"
+            f"{ae('coin')} Кэшбэк: <b>{fmt_price(bonus)}</b>\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            f"<blockquote>{ae('bell')} Ожидайте уведомлений о статусе доставки!</blockquote>",
             parse_mode="HTML", reply_markup=kb_main()
         )
     except Exception:
@@ -3705,31 +3487,20 @@ async def cb_setordst(cb: types.CallbackQuery):
     try:
         if status == "delivered":
             await bot.send_message(order['user_id'],
-                f"🚚 <b>ЗАКАЗ #{oid} ДОСТАВЛЕН!</b>\n\n"
-                f"{divider('stars')}\n\n"
-                f"  👗 {pname} {short} ({order['size']})\n\n"
-                f"<blockquote>Пожалуйста, подтвердите получение,\n"
-                f"чтобы мы знали, что всё в порядке. ✅</blockquote>",
+                f"{ae('truck')} <b>Ваш заказ #{oid} доставлен!</b>\n\n"
+                f"{ae('bag')} {pname} {short} ({order['size']})\n\n"
+                f"<blockquote>{ae('ok')} Пожалуйста, подтвердите получение:</blockquote>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="✅ Подтверждаю получение",
-                                         callback_data=f"confirm_order_{oid}",
-                                         icon_custom_emoji_id="5870633910337015697")
+                    InlineKeyboardButton(text="Подтверждаю получение",
+                                         callback_data=f"confirm_order_{oid}", icon_custom_emoji_id="5870633910337015697")
                 ]])
             )
         else:
-            status_icons = {
-                "processing": "🔄", "china": "✈️",
-                "arrived": "📦", "confirmed": "✅",
-            }
-            icon = status_icons.get(status, "📡")
             await bot.send_message(order['user_id'],
-                f"📡 <b>СТАТУС ЗАКАЗА #{oid} ОБНОВЛЁН</b>\n\n"
-                f"{divider()}\n\n"
-                f"  👗 {pname} {short} ({order['size']})\n"
-                f"  {icon} <b>{order_status_text(status)}</b>\n\n"
-                f"<blockquote>Вопросы? Пишите в поддержку.\n"
-                f"Мы всегда на связи! 💬</blockquote>",
+                f"{ae('bell')} <b>Статус заказа #{oid} обновлён</b>\n\n"
+                f"{ae('bag')} {pname} {short} ({order['size']})\n"
+                f"{ae('refresh')} <b>Новый статус:</b> {order_status_text(status)}",
                 parse_mode="HTML"
             )
     except Exception:
@@ -4050,35 +3821,22 @@ async def cb_adm_stats(cb: types.CallbackQuery):
     if not admin_guard(cb.from_user.id):
         return
     uc, pc, rv, ac, oc, prc, bc, cmp = await get_stats()
-    conv = f"{(pc/uc*100):.1f}%" if uc > 0 else "—"
     text = (
-        f"📊 <b>ДАШБОРД</b>\n"
-        f"<i>{datetime.now().strftime('%d.%m.%Y %H:%M')}</i>\n"
-        f"{divider('stars')}\n\n"
-        f"👥 <b>Аудитория</b>\n"
-        f"  Пользователей:  <b>{uc}</b>\n"
-        f"  Покупателей:    <b>{pc}</b>\n"
-        f"  Конверсия:      <b>{conv}</b>\n"
-        f"  Забанено:       <b>{bc}</b>\n\n"
-        f"{divider()}\n\n"
-        f"💰 <b>Продажи</b>\n"
-        f"  Выручка:        <b>{fmt_price(rv)}</b>\n"
-        f"  Покупок:        <b>{pc}</b>\n"
-        f"  В обработке:    <b>{oc}</b>\n\n"
-        f"{divider()}\n\n"
-        f"📦 <b>Каталог</b>\n"
-        f"  Активных:       <b>{ac}</b>\n"
-        f"  Промокодов:     <b>{prc}</b>\n\n"
-        f"{divider()}\n\n"
-        f"⚠️ <b>Требует внимания</b>\n"
-        f"  Жалоб открытых: <b>{cmp}</b>\n"
-        f"  Новых заказов:  <b>{oc}</b>"
+        f"📊 <b>Статистика</b>\n\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"👥 Пользователей: <b>{uc}</b>\n"
+        f"🚫 Заблокировано: <b>{bc}</b>\n"
+        f"{ae('cart')} Заказов: <b>{pc}</b>\n"
+        f"{ae('money')} Выручка: <b>{fmt_price(rv)}</b>\n"
+        f"{ae('box')} Товаров: <b>{ac}</b>\n"
+        f"🔄 В работе: <b>{oc}</b>\n"
+        f"🎟 Промокодов: <b>{prc}</b>\n"
+        f"⚠️ Жалоб (открытых): <b>{cmp}</b>\n"
+        f"━━━━━━━━━━━━━━━━━"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Лог за 24ч", callback_data="adm_log",
-                              icon_custom_emoji_id="5870930636742595124")],
-        [InlineKeyboardButton(text="‹ Назад", callback_data="adm_panel",
-                              icon_custom_emoji_id="5893057118545646106")],
+        [InlineKeyboardButton(text="Лог за 24ч (HTML)", callback_data="adm_log", icon_custom_emoji_id="5870930636742595124")],
+        [InlineKeyboardButton(text="‹ Назад", callback_data="adm_panel", icon_custom_emoji_id="5893057118545646106")],
     ])
     try:
         await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
@@ -4128,48 +3886,46 @@ async def cb_adm_log(cb: types.CallbackQuery):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Alone Above — Лог за 24 часа</title>
+<title>ShopBot — Лог за 24 часа</title>
 <style>
   :root {{
-    --bg: #050508;
-    --card: #0f0f18;
-    --accent: #c9a227;
-    --accent2: #e8d5a0;
-    --green: #22c55e;
+    --bg: #0f0f1a;
+    --card: #1a1a2e;
+    --accent: #7c3aed;
+    --accent2: #06b6d4;
+    --green: #10b981;
     --red: #ef4444;
     --yellow: #f59e0b;
-    --text: #e8e8f0;
-    --muted: #6b7280;
-    --border: #1e1e2e;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --border: #2d2d44;
   }}
-  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap');
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{
-    font-family: 'DM Sans', 'Segoe UI', system-ui, sans-serif;
+    font-family: 'Segoe UI', system-ui, sans-serif;
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
-    padding: 24px;
+    padding: 20px;
   }}
   .header {{
-    background: linear-gradient(135deg, #1a1608, #2a2010);
-    border: 1px solid var(--accent);
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
     border-radius: 16px;
-    padding: 28px 36px;
-    margin-bottom: 28px;
+    padding: 24px 32px;
+    margin-bottom: 24px;
     display: flex;
     justify-content: space-between;
     align-items: center;
     flex-wrap: wrap;
     gap: 12px;
   }}
-  .header h1 {{ font-size: 1.9rem; font-weight: 700; color: var(--accent2); letter-spacing: 0.05em; }}
-  .header p {{ opacity: 0.7; font-size: 0.88rem; color: var(--accent); }}
+  .header h1 {{ font-size: 1.8rem; font-weight: 700; }}
+  .header p {{ opacity: 0.85; font-size: 0.9rem; }}
   .stats-grid {{
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: 16px;
-    margin-bottom: 28px;
+    margin-bottom: 24px;
   }}
   .stat-card {{
     background: var(--card);
@@ -6454,304 +6210,19 @@ async def nav_clear_state(cb: types.CallbackQuery, state: FSMContext):
     if await state.get_state():
         await state.clear()
 
-
-# ══════════════════════════════════════════════════════════════════
-#  v8.0 ECOSYSTEM — НОВЫЕ РАЗДЕЛЫ
-# ══════════════════════════════════════════════════════════════════
-
-# ── Образ дня ─────────────────────────────────────────────────────
-@router.callback_query(F.data == "outfit_of_day")
-async def cb_outfit_of_day(cb: types.CallbackQuery):
-    if await ban_check(cb.from_user.id, cb.message.answer): return
-    try:
-        await cb.message.delete()
-    except Exception:
-        pass
-    uid = cb.from_user.id
-
-    # Пробуем взять активный дроп или случайный товар
-    import random as _random
-    drops = await get_active_drops()
-    featured_item = None
-    item_type = None
-
-    if drops:
-        featured_item = _random.choice(drops)
-        item_type = "drop"
-    else:
-        all_prods = await db_all(
-            'SELECT * FROM products WHERE is_active=1 AND stock>0 ORDER BY RANDOM() LIMIT 1'
-        )
-        if all_prods:
-            featured_item = all_prods[0]
-            item_type = "product"
-
-    today = datetime.now().strftime("%d.%m.%Y")
-    style_tips = [
-        "Минимализм + акцент на качество ткани",
-        "Оверсайз-силуэт и монохром — тренд сезона",
-        "Сочетай контрасты: тёмный верх, светлый низ",
-        "Streetwear + классика = идеальный баланс",
-        "Один яркий акцент — остальное нейтральное",
-        "Текстуры решают всё — играй фактурами",
-        "Базовый гардероб — основа любого лука",
-        "Правильная обувь меняет всё",
-    ]
-    day_hash = int(datetime.now().strftime("%j")) % len(style_tips)
-    tip = style_tips[day_hash]
-
-    if not featured_item:
-        text = (
-            f"👗 <b>ОБРАЗ ДНЯ</b>\n"
-            f"<i>{today}</i>\n"
-            f"{divider('stars')}\n\n"
-            f"🎨 <b>Совет стилиста:</b>\n"
-            f"<i>«{tip}»</i>\n\n"
-            f"{divider()}\n\n"
-            f"<blockquote>Сегодня наша команда готовит\n"
-            f"новый образ для вас. Загляните позже! ✨\n\n"
-            f"Пока исследуйте каталог 👇</blockquote>"
-        )
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Открыть каталог", callback_data="shop",
-                                  icon_custom_emoji_id="5373052667671093676")],
-            [InlineKeyboardButton(text="‹ Назад", callback_data="main",
-                                  icon_custom_emoji_id="5893057118545646106")],
-        ])
-        await bot.send_message(uid, text, parse_mode="HTML", reply_markup=kb)
-        await cb.answer()
-        return
-
-    name  = featured_item.get('name', '—')
-    price = featured_item.get('price', 0)
-    desc  = (featured_item.get('description', '') or '')[:80]
-    sizes = parse_sizes(featured_item) if item_type == "product" else []
-    sizes_s = "  ".join(sizes) if sizes else "—"
-
-    text = (
-        f"👗 <b>ОБРАЗ ДНЯ</b>\n"
-        f"<i>{today}</i>\n"
-        f"{divider('stars')}\n\n"
-        f"🎨 <b>Совет стилиста:</b>\n"
-        f"<i>«{tip}»</i>\n\n"
-        f"{divider()}\n\n"
-        f"✦ <b>Сегодняшний выбор:</b>\n\n"
-        f"<b>{name.upper()}</b>\n"
-        f"<i>{desc}{'…' if len(featured_item.get('description',''))>80 else ''}</i>\n\n"
-        f"💰 <b>{fmt_price(price)}</b>"
-        + (f"\n📐 Размеры:  <code>{sizes_s}</code>" if sizes_s != "—" else "") +
-        f"\n\n{divider('dots')}\n\n"
-        f"<blockquote>Образ дня обновляется каждый день.\n"
-        f"Успей забрать до конца дня! ⏰</blockquote>"
-    )
-
-    if item_type == "drop":
-        item_btn = InlineKeyboardButton(
-            text="🔥 Смотреть дроп",
-            callback_data=f"drop_detail_{featured_item['id']}",
-            icon_custom_emoji_id="5420315771991497307"
-        )
-    else:
-        item_btn = InlineKeyboardButton(
-            text="✦ Открыть товар",
-            callback_data=f"prod_{featured_item['id']}",
-            icon_custom_emoji_id="5373052667671093676"
-        )
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [item_btn],
-        [
-            InlineKeyboardButton(text="Каталог", callback_data="shop",
-                                 icon_custom_emoji_id="5373052667671093676"),
-            InlineKeyboardButton(text="Дропы",   callback_data="drops_menu",
-                                 icon_custom_emoji_id="5420315771991497307"),
-        ],
-        [InlineKeyboardButton(text="‹ Главное меню", callback_data="main",
-                              icon_custom_emoji_id="5873147866364514353")],
-    ])
-
-    card_fid = featured_item.get('card_file_id', '')
-    card_mt  = featured_item.get('card_media_type', '')
-    if card_fid and card_mt:
-        try:
-            if card_mt == 'photo':
-                await bot.send_photo(uid, card_fid, caption=text,
-                                     parse_mode="HTML", reply_markup=kb)
-            elif card_mt == 'video':
-                await bot.send_video(uid, card_fid, caption=text,
-                                     parse_mode="HTML", reply_markup=kb)
-            await cb.answer()
-            return
-        except Exception:
-            pass
-    await bot.send_message(uid, text, parse_mode="HTML", reply_markup=kb)
-    await cb.answer()
-
-
-# ── Style DNA ─────────────────────────────────────────────────────
-@router.callback_query(F.data == "style_dna")
-async def cb_style_dna(cb: types.CallbackQuery):
-    if await ban_check(cb.from_user.id, cb.message.answer): return
-    uid    = cb.from_user.id
-    orders = await get_user_orders(uid)
-
-    if not orders:
-        text = (
-            f"🧬 <b>STYLE DNA</b>\n"
-            f"{divider('dots')}\n\n"
-            f"<blockquote>Ваш стиль ещё формируется...\n\n"
-            f"Сделайте первые покупки, и мы составим\n"
-            f"ваш уникальный портрет стиля!\n\n"
-            f"✦ Мы анализируем: категории товаров,\n"
-            f"ценовой диапазон и частоту покупок.</blockquote>"
-        )
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Перейти в каталог", callback_data="shop",
-                                  icon_custom_emoji_id="5373052667671093676")],
-            [InlineKeyboardButton(text="‹ Профиль", callback_data="profile_view",
-                                  icon_custom_emoji_id="5870994129244131212")],
-        ])
-        try:
-            await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
-        except Exception:
-            await cb.message.answer(text, parse_mode="HTML", reply_markup=kb)
-        await cb.answer()
-        return
-
-    total     = len(orders)
-    avg_price = sum(o['price'] for o in orders) / total if total else 0
-
-    if avg_price > 20000:
-        style_type = "✦ Luxury Connoisseur"
-        style_desc = "Вы цените качество и эксклюзивность. Ваш выбор — премиум."
-        palette    = "Чёрный  ·  Белый  ·  Золотой"
-    elif avg_price > 8000:
-        style_type = "⚡ Urban Trendsetter"
-        style_desc = "Вы на гребне волны трендов. Streetwear и модерн — ваше."
-        palette    = "Серый  ·  Синий  ·  Кирпичный"
-    elif avg_price > 3000:
-        style_type = "🌿 Conscious Minimalist"
-        style_desc = "Меньше — значит больше. Строите гардероб осознанно."
-        palette    = "Бежевый  ·  Молочный  ·  Хаки"
-    else:
-        style_type = "🎨 Creative Explorer"
-        style_desc = "Вы исследуете стиль, экспериментируете и находите своё."
-        palette    = "Яркие акценты  ·  Смешение стилей"
-
-    consistency  = min(10, total)
-    bar = "█" * consistency + "░" * (10 - consistency)
-
-    text = (
-        f"🧬 <b>STYLE DNA</b>\n"
-        f"{divider('dots')}\n\n"
-        f"<b>{style_type}</b>\n"
-        f"<i>{style_desc}</i>\n\n"
-        f"{divider()}\n\n"
-        f"🎨 <b>Ваша палитра:</b>\n"
-        f"<code>{palette}</code>\n\n"
-        f"📊 <b>Профиль стиля:</b>\n"
-        f"  Покупок:       <b>{total}</b>\n"
-        f"  Средний чек:   <b>{fmt_price(avg_price)}</b>\n"
-        f"  Активность:    <code>{bar}</code>\n\n"
-        f"{divider('stars')}\n\n"
-        f"<blockquote>✦ Style DNA обновляется с каждой покупкой.\n"
-        f"Продолжайте формировать свой уникальный стиль!</blockquote>"
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🛍 Подобрать товары", callback_data="shop",
-                              icon_custom_emoji_id="5373052667671093676")],
-        [InlineKeyboardButton(text="‹ Профиль", callback_data="profile_view",
-                              icon_custom_emoji_id="5870994129244131212")],
-    ])
-    try:
-        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
-    except Exception:
-        await cb.message.answer(text, parse_mode="HTML", reply_markup=kb)
-    await cb.answer()
-
-
-# ── Таблица лидеров ───────────────────────────────────────────────
-@router.callback_query(F.data == "leaderboard")
-async def cb_leaderboard(cb: types.CallbackQuery):
-    if await ban_check(cb.from_user.id, cb.message.answer): return
-    uid = cb.from_user.id
-
-    top_users = await db_all(
-        '''SELECT user_id, username, first_name, total_spent, total_purchases
-           FROM users WHERE total_spent > 0
-           ORDER BY total_spent DESC LIMIT 10'''
-    )
-    my_rank_row = await db_one(
-        '''SELECT COUNT(*) + 1 AS rank FROM users
-           WHERE total_spent > (SELECT COALESCE(total_spent,0) FROM users WHERE user_id=$1)''',
-        (uid,)
-    )
-    my_rank_n = my_rank_row['rank'] if my_rank_row else "?"
-
-    medals = ["🥇", "🥈", "🥉"] + ["🏅"] * 7
-    text = (
-        f"🏆 <b>HALL OF FAME</b>\n"
-        f"<i>Топ покупателей Alone Above</i>\n"
-        f"{divider('stars')}\n\n"
-    )
-    for i, u in enumerate(top_users):
-        medal = medals[i]
-        name  = u.get('first_name', '') or u.get('username', '')
-        name_short = (name[:2] + "***") if name else "Аноним"
-        vip, _, _ = get_vip_status(u.get('total_spent', 0))
-        text += (
-            f"{medal} <b>{name_short}</b>  <i>{vip}</i>\n"
-            f"     {fmt_price(u['total_spent'])}  ·  {u['total_purchases']} заказов\n\n"
-        )
-
-    my_user = await get_user(uid)
-    my_spent = my_user.get('total_spent', 0) if my_user else 0
-    my_vip, _, _ = get_vip_status(my_spent)
-    text += (
-        f"{divider()}\n\n"
-        f"📍 <b>Ваше место:</b> #{my_rank_n}  {my_vip}\n"
-        f"    Потрачено: {fmt_price(my_spent)}\n\n"
-        f"<blockquote>Делайте покупки и поднимайтесь выше!\n"
-        f"Топ-3 получают приоритетный доступ к дропам. 🔥</blockquote>"
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="‹ Профиль", callback_data="profile_view",
-                              icon_custom_emoji_id="5870994129244131212")],
-    ])
-    try:
-        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
-    except Exception:
-        await cb.message.answer(text, parse_mode="HTML", reply_markup=kb)
-    await cb.answer()
-
-
-# ── edit_phone / edit_address алиасы ─────────────────────────────
-@router.callback_query(F.data == "edit_phone")
-async def cb_edit_phone(cb: types.CallbackQuery):
-    # redirect to profile_phone
-    cb.data = "profile_phone"
-    await cb_profile_phone(cb)
-
-@router.callback_query(F.data == "edit_address")
-async def cb_edit_address(cb: types.CallbackQuery):
-    cb.data = "profile_address"
-    await cb_profile_address(cb)
-
-
 # ══════════════════════════════════════════════
 #  Main
 # ══════════════════════════════════════════════
 async def main():
     await init_db()
     logging.basicConfig(level=logging.INFO)
-    print("\033[33m" + "✦" * 55)
-    print("  ✦  ALONE ABOVE — ECOSYSTEM BOT v8.0")
-    print("  ✦  Шымкент, Казахстан  |  PostgreSQL + CryptoPay")
-    print("✦" * 55 + "\033[0m")
+    print("\033[35m" + "═" * 50)
+    print("  🛍  SHOPBOT — Шымкент, Казахстан")
+    print("  🗄  PostgreSQL (asyncpg)")
+    print("═" * 50 + "\033[0m")
     print(f"  💱 Курс USD/KZT: {USD_KZT_RATE} (фикс.)")
     print(f"  🎁 Кэшбэк: {CASHBACK_PERCENT}%")
-    print(f"  💎 VIP-уровней: {len(VIP_LEVELS)}")
-    print(f"  🚀 Запускаем экосистему...")
+    print("🚀 Бот запущен!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
