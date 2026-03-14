@@ -1284,17 +1284,17 @@ def kb_back(cd="main"):
 def kb_admin():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Статистика", callback_data="adm_stats", icon_custom_emoji_id="5870921681735781843")],
-        [InlineKeyboardButton(text="🖼 Медиа", callback_data="adm_media", icon_custom_emoji_id="6035128606563241721"),
-         InlineKeyboardButton(text="📨 Рассылка", callback_data="adm_broadcast", icon_custom_emoji_id="6039422865189638057")],
+        [InlineKeyboardButton(text="Медиа", callback_data="adm_media", icon_custom_emoji_id="6035128606563241721"),
+         InlineKeyboardButton(text="Рассылка", callback_data="adm_broadcast", icon_custom_emoji_id="6039422865189638057")],
         [InlineKeyboardButton(text="Товары", callback_data="adm_products", icon_custom_emoji_id="5884479287171485878"),
-         InlineKeyboardButton(text="📁 Категории", callback_data="adm_cats", icon_custom_emoji_id="5870528606328852614")],
+         InlineKeyboardButton(text="Категории", callback_data="adm_cats", icon_custom_emoji_id="5870528606328852614")],
         [InlineKeyboardButton(text="Заказы", callback_data="adm_orders", icon_custom_emoji_id="5890937706803894250")],
-        [InlineKeyboardButton(text="🎟 Промокоды", callback_data="adm_promos", icon_custom_emoji_id="5904462880941545555")],
-        [InlineKeyboardButton(text="👥 Пользователи", callback_data="adm_users", icon_custom_emoji_id="5870772616305839506")],
+        [InlineKeyboardButton(text="Промокоды", callback_data="adm_promos", icon_custom_emoji_id="5904462880941545555")],
+        [InlineKeyboardButton(text="Пользователи", callback_data="adm_users", icon_custom_emoji_id="5870772616305839506")],
         [InlineKeyboardButton(text="Партнёры", callback_data="adm_partners", icon_custom_emoji_id="5769289093221454192")],
-        [InlineKeyboardButton(text="🔥 Дропы", callback_data="adm_drops", icon_custom_emoji_id="5420315771991497307")],
+        [InlineKeyboardButton(text="Дропы", callback_data="adm_drops", icon_custom_emoji_id="5420315771991497307")],
         [InlineKeyboardButton(text="Сообщения бота", callback_data="adm_botmsgs", icon_custom_emoji_id="5465300082628763143")],
-        [InlineKeyboardButton(text="📊 Лог (HTML)", callback_data="adm_log", icon_custom_emoji_id="5870930636742595124")],
+        [InlineKeyboardButton(text="Лог (HTML)", callback_data="adm_log", icon_custom_emoji_id="5870930636742595124")],
         [InlineKeyboardButton(text="Настройки", callback_data="adm_settings", icon_custom_emoji_id="5870982283724328568")],
     ])
 
@@ -1723,7 +1723,7 @@ async def _show_cart(uid: int, edit_msg=None, send_fn=None):
         for i in items:
             kb_rows.append([
                 InlineKeyboardButton(
-                    text="{i['name']} [{i['size']}]",
+                    text=f"{i['name']} [{i['size']}]",
                     callback_data=f"cart_del_{i['product_id']}_{i['size']}"
                 )
             ])
@@ -1774,7 +1774,7 @@ async def cb_cart_add(cb: types.CallbackQuery):
 
     # Показываем выбор размера
     kb_rows = [[InlineKeyboardButton(
-        text="{s}", callback_data=f"cart_size_{pid}_{s}"
+        text=f"{s}", callback_data=f"cart_size_{pid}_{s}"
     )] for s in sizes]
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data=f"prod_{pid}", icon_custom_emoji_id="5893057118545646106")])
     try:
@@ -1880,7 +1880,7 @@ async def cb_cart_checkout(cb: types.CallbackQuery, state: FSMContext):
     )
     await state.update_data(cart_items=[{'pid': i['product_id'], 'size': i['size'], 'price': i['price'], 'name': i['name']} for i in items])
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎟 Применить промокод", callback_data="cart_promo", icon_custom_emoji_id="5904462880941545555")],
+        [InlineKeyboardButton(text="Применить промокод", callback_data="cart_promo", icon_custom_emoji_id="5904462880941545555")],
         [InlineKeyboardButton(text="Оплатить Kaspi",     callback_data="cart_pay_kaspi", icon_custom_emoji_id="5879814368572478751")],
         [InlineKeyboardButton(text="Оплатить CryptoBot", callback_data="cart_pay_crypto", icon_custom_emoji_id="5260752406890711732")],
         [InlineKeyboardButton(text="‹ Назад",               callback_data="my_cart", icon_custom_emoji_id="5893057118545646106")],
@@ -2050,7 +2050,7 @@ async def _show_wishlist(uid: int, edit_msg=None, send_fn=None):
         kb_rows = []
         for i in items:
             kb_rows.append([
-                InlineKeyboardButton(text="{i['name']}", callback_data=f"prod_{i['product_id']}"),
+                InlineKeyboardButton(text=f"{i['name']}", callback_data=f"prod_{i['product_id']}"),
                 InlineKeyboardButton(text="Убрать",      callback_data=f"wish_rm_{i['product_id']}", icon_custom_emoji_id="5870657884844462243"),
             ])
         kb_rows.append([InlineKeyboardButton(text="‹ Профиль", callback_data="profile_view", icon_custom_emoji_id="5870994129244131212")])
@@ -2159,7 +2159,7 @@ async def cb_partnership(cb: types.CallbackQuery):
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Связаться", url=f"https://t.me/{SUPPORT_USERNAME.lstrip('@')}", icon_custom_emoji_id="5465300082628763143")],
-        [InlineKeyboardButton(text="📢 Разместить рекламу", callback_data="ad_warning", icon_custom_emoji_id="6039422865189638057")],
+        [InlineKeyboardButton(text="Разместить рекламу", callback_data="ad_warning", icon_custom_emoji_id="6039422865189638057")],
         [InlineKeyboardButton(text="‹ Назад", callback_data="about_back", icon_custom_emoji_id="5893057118545646106")],
     ])
     try:
@@ -2428,7 +2428,7 @@ async def show_catalog(chat_id: int):
     for c in cats:
         subcats = await get_categories(parent_id=c['id'])
         icon = ae('folder') if subcats else ae('shop')
-        kb_rows.append([InlineKeyboardButton(text="{icon} {c['name']}", callback_data=f"cat_{c['id']}")])
+        kb_rows.append([InlineKeyboardButton(text=f"{c['name']}", callback_data=f"cat_{c['id']}", icon_custom_emoji_id="5433653135799228968" if subcats else "5373052667671093676")])
     if drops or upcoming:
         kb_rows.append([InlineKeyboardButton(text="Дропы", callback_data="drops_menu", icon_custom_emoji_id="5420315771991497307")])
     kb_rows.append([InlineKeyboardButton(text="‹ Главное меню", callback_data="main", icon_custom_emoji_id="5873147866364514353")])
@@ -2448,7 +2448,7 @@ async def cb_shop(cb: types.CallbackQuery):
     for c in cats:
         subcats = await get_categories(parent_id=c['id'])
         icon = ae('folder') if subcats else ae('shop')
-        kb_rows.append([InlineKeyboardButton(text="{icon} {c['name']}", callback_data=f"cat_{c['id']}")])
+        kb_rows.append([InlineKeyboardButton(text=f"{c['name']}", callback_data=f"cat_{c['id']}", icon_custom_emoji_id="5433653135799228968" if subcats else "5373052667671093676")])
     if drops or upcoming:
         kb_rows.append([InlineKeyboardButton(text="Дропы", callback_data="drops_menu", icon_custom_emoji_id="5420315771991497307")])
     kb_rows.append([InlineKeyboardButton(text="‹ Главное меню", callback_data="main", icon_custom_emoji_id="5873147866364514353")])
@@ -2473,7 +2473,7 @@ async def cb_cat(cb: types.CallbackQuery):
     if subcats:
         kb_rows = []
         for sc in subcats:
-            kb_rows.append([InlineKeyboardButton(text="{sc['name']}", callback_data=f"cat_{sc['id']}")])
+            kb_rows.append([InlineKeyboardButton(text=f"{sc['name']}", callback_data=f"cat_{sc['id']}", icon_custom_emoji_id="5373052667671093676")])
         # Also show products directly in this category
         prods = await get_products(cid)
         for p in prods:
@@ -2484,7 +2484,7 @@ async def cb_cat(cb: types.CallbackQuery):
             )])
         kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="shop", icon_custom_emoji_id="5893057118545646106")])
         cat_name = cat['name'] if cat else 'Категория'
-        text = f"📂 <b>{cat_name}</b>\n\n<blockquote>👇 Выберите подкатегорию или товар:</blockquote>"
+        text = f"{ae('folder')} <b>{cat_name}</b>\n\n<blockquote>{ae('down')} Выберите подкатегорию или товар:</blockquote>"
         try:
             await cb.message.edit_text(text, parse_mode="HTML",
                                        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
@@ -2500,7 +2500,7 @@ async def cb_cat(cb: types.CallbackQuery):
         return
     kb_rows = []
     for p in prods:
-        icon = "✅" if p['stock'] > 0 else "❌"
+        icon = "✅" if p['stock'] > 0 else "✖"
         sid  = f" #{p.get('short_id','')}" if p.get('short_id') else ""
         kb_rows.append([InlineKeyboardButton(
             text=f"{icon} {p['name']}{sid} · {fmt_price(p['price'])}",
@@ -2510,7 +2510,7 @@ async def cb_cat(cb: types.CallbackQuery):
     parent_id = cat['parent_id'] if cat else 0
     back_cd = f"cat_{parent_id}" if parent_id else "shop"
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data=back_cd, icon_custom_emoji_id="5893057118545646106")])
-    kb_rows.append([InlineKeyboardButton(text="📢 Подключить рекламу", callback_data="ad_warning", icon_custom_emoji_id="6039422865189638057")])
+    kb_rows.append([InlineKeyboardButton(text="Подключить рекламу", callback_data="ad_warning", icon_custom_emoji_id="6039422865189638057")])
     text = f"<blockquote>{ae('down')} Выберите товар:</blockquote>"
     try:
         await cb.message.edit_text(text, parse_mode="HTML",
@@ -2534,7 +2534,7 @@ async def cb_prod(cb: types.CallbackQuery):
     sizes   = parse_sizes(p)
     sizes_s = "  ".join(sizes) if sizes else "—"
     stock   = p['stock']
-    stock_s = (f"✅ В наличии ({stock} шт.)" if stock > 0 else "❌ Нет в наличии")
+    stock_s = (f"В наличии ({stock} шт.)" if stock > 0 else "Нет в наличии")
 
     # Средний рейтинг
     avg_rating  = await get_avg_rating(pid)
@@ -2597,7 +2597,7 @@ async def cb_prod(cb: types.CallbackQuery):
 
     if gallery:
         kb_rows.append([InlineKeyboardButton(
-            text=f"🖼 Галерея ({len(gallery)})", callback_data=f"gallery_{pid}_0"
+            text=f"Галерея ({len(gallery)})", callback_data=f"gallery_{pid}_0", icon_custom_emoji_id="5870528606328852614"
         )])
     kb_rows.append([InlineKeyboardButton(text="Отзывы", callback_data=f"reviews_{pid}", icon_custom_emoji_id="5368324170671202286")])
     # Back button: go to category
@@ -2684,7 +2684,7 @@ async def cb_gallery(cb: types.CallbackQuery):
     nav = []
     if idx > 0:
         nav.append(InlineKeyboardButton(text="◀️", callback_data=f"gallery_{pid}_{idx-1}", icon_custom_emoji_id="5893057118545646106"))
-    nav.append(InlineKeyboardButton(text="{idx+1}/{total}", callback_data="noop"))
+    nav.append(InlineKeyboardButton(text=f"{idx+1}/{total}", callback_data="noop"))
     if idx < total - 1:
         nav.append(InlineKeyboardButton(text="▶️", callback_data=f"gallery_{pid}_{idx+1}", icon_custom_emoji_id="5769289093221454192"))
 
@@ -2692,7 +2692,7 @@ async def cb_gallery(cb: types.CallbackQuery):
         nav,
         [InlineKeyboardButton(text="‹ К товару", callback_data=f"prod_{pid}", icon_custom_emoji_id="5893057118545646106")]
     ])
-    caption = f"🖼 <b>Галерея</b>  {idx+1}/{total}  —  {p['name']}"
+    caption = f"<b>Галерея</b>  {idx+1}/{total}  —  {p['name']}"
 
     # ИСПРАВЛЕНИЕ: удаляем и отправляем заново, чтобы медиа не пропадало
     try:
@@ -2736,7 +2736,7 @@ async def cb_buy(cb: types.CallbackQuery):
         await _show_payment_confirm(cb, pid, "ONE_SIZE")
         return
 
-    kb_rows = [[InlineKeyboardButton(text="{s}", callback_data=f"size_{pid}_{s}")] for s in sizes]
+    kb_rows = [[InlineKeyboardButton(text=f"{s}", callback_data=f"size_{pid}_{s}")] for s in sizes]
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data=f"prod_{pid}", icon_custom_emoji_id="5893057118545646106")])
 
     text = (f"{ae('size')} <b>Выберите размер</b>\n\n"
@@ -2809,7 +2809,7 @@ async def _show_payment_confirm(cb: types.CallbackQuery, pid: int, size: str,
     ]
     if not promo:
         kb_rows.append([InlineKeyboardButton(
-            text="🎟 Применить промокод",
+            text="Применить промокод",
             callback_data=f"enterpromo_{pid}_{size}"
         , icon_custom_emoji_id="5904462880941545555")])
     kb_rows.append([InlineKeyboardButton(text="Добавить примечание продавцу",
@@ -2970,7 +2970,7 @@ async def cb_pcrypto(cb: types.CallbackQuery):
         text += f"🎟 <b>Промокод:</b> <code>{promo_code}</code> (−{fmt_price(discount)})\n"
     text += (f"\n<blockquote>1. Нажмите «Оплатить»\n2. Вернитесь в бот\n3. Нажмите «Проверить оплату»</blockquote>")
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Оплатить", url=inv['pay_url'], icon_custom_emoji_id="5904462880941545555")],
+        [InlineKeyboardButton(text="Оплатить", url=inv['pay_url'], icon_custom_emoji_id="5904462880941545555")],
         [InlineKeyboardButton(text="Проверить оплату", callback_data=f"chk_{inv['invoice_id']}", icon_custom_emoji_id="5870633910337015697")],
         [InlineKeyboardButton(text="‹ Назад", callback_data=f"buy_{pid}", icon_custom_emoji_id="5893057118545646106")],
     ])
@@ -3621,7 +3621,7 @@ async def proc_ad_description(msg: types.Message, state: FSMContext):
             f"Стоимость: <b>{fmt_price(AD_PRICE_KZT)}</b>\n\n"
             f"<blockquote>Ваша реклама:\n{msg.text.strip()[:200]}</blockquote>")
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔐 CryptoBot (USDT)", callback_data="ad_pay_crypto", icon_custom_emoji_id="5260752406890711732")],
+        [InlineKeyboardButton(text="CryptoBot (USDT)", callback_data="ad_pay_crypto", icon_custom_emoji_id="5260752406890711732")],
         [InlineKeyboardButton(text="Kaspi", callback_data="ad_pay_kaspi", icon_custom_emoji_id="5879814368572478751")],
     ])
     await msg.answer(text, parse_mode="HTML", reply_markup=kb)
@@ -3639,7 +3639,7 @@ async def cb_ad_pay_crypto(cb: types.CallbackQuery, state: FSMContext):
             f"{ae('money')} <b>Сумма:</b> <code>{fmt_price(AD_PRICE_KZT)}</code> (~<b>{usd_amt} USDT</b>)\n\n"
             f"<blockquote>1. Нажмите «Оплатить»\n2. Вернитесь в бот\n3. Нажмите «Проверить оплату»</blockquote>")
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Оплатить", url=inv['pay_url'], icon_custom_emoji_id="5904462880941545555")],
+        [InlineKeyboardButton(text="Оплатить", url=inv['pay_url'], icon_custom_emoji_id="5904462880941545555")],
         [InlineKeyboardButton(text="Проверить оплату", callback_data=f"ad_chk_{inv['invoice_id']}", icon_custom_emoji_id="5870633910337015697")],
     ])
     try:
@@ -4295,7 +4295,7 @@ async def cb_adm_user(cb: types.CallbackQuery):
     if user.get('is_banned'):
         ban_btn = InlineKeyboardButton(text="Разблокировать", callback_data=f"adm_unban_{uid}", icon_custom_emoji_id="6037496202990194718")
     else:
-        ban_btn = InlineKeyboardButton(text="🚫 Заблокировать", callback_data=f"adm_ban_{uid}", icon_custom_emoji_id="6037249452824072506")
+        ban_btn = InlineKeyboardButton(text="Заблокировать", callback_data=f"adm_ban_{uid}", icon_custom_emoji_id="6037249452824072506")
 
     current_role = await get_user_role(uid)
     role_label = ROLES.get(current_role, current_role or "—")
@@ -4578,7 +4578,7 @@ async def cb_adm_cats(cb: types.CallbackQuery):
     for c in cats:
         parent_mark = f" ↳" if c.get('parent_id', 0) else ""
         kb_rows.append([
-            InlineKeyboardButton(text="{parent_mark} {c['name']}", callback_data=f"ecat_{c['id']}"),
+            InlineKeyboardButton(text=f"{parent_mark} {c['name']}", callback_data=f"ecat_{c['id']}"),
             InlineKeyboardButton(text=" ", callback_data=f"dcat_{c['id']}"),
         ])
     kb_rows.append([InlineKeyboardButton(text="Добавить категорию", callback_data="addcat", icon_custom_emoji_id="5870633910337015697")])
@@ -4601,7 +4601,7 @@ async def cb_addsubcat(cb: types.CallbackQuery, state: FSMContext):
     if not cats:
         await cb.answer("Сначала создайте родительскую категорию!", show_alert=True)
         return
-    kb_rows = [[InlineKeyboardButton(text="{c['name']}", callback_data=f"subcat_parent_{c['id']}")] for c in cats]
+    kb_rows = [[InlineKeyboardButton(text=f"{c['name']}", callback_data=f"subcat_parent_{c['id']}")] for c in cats]
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_cats", icon_custom_emoji_id="5893057118545646106")])
     try:
         await cb.message.edit_text("📂 <b>Выберите родительскую категорию:</b>",
@@ -4672,7 +4672,7 @@ async def cb_adm_products(cb: types.CallbackQuery):
         return
     cats    = await get_categories()
     kb_rows = [[InlineKeyboardButton(
-        text="{c['name']}", callback_data=f"apcat_{c['id']}"
+        text=f"{c['name']}", callback_data=f"apcat_{c['id']}"
     )] for c in cats]
     kb_rows.append([InlineKeyboardButton(text="Добавить товар", callback_data="addprod", icon_custom_emoji_id="5884479287171485878")])
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_panel", icon_custom_emoji_id="5893057118545646106")])
@@ -4872,7 +4872,7 @@ async def cb_addprod(cb: types.CallbackQuery, state: FSMContext):
     for c in all_cats:
         parent_mark = "  ↳ " if c.get('parent_id', 0) else ""
         kb.append([InlineKeyboardButton(
-            text="{parent_mark}{c['name']}",
+            text=f"{parent_mark}{c['name']}",
             callback_data=f"npcat_{c['id']}"
         )])
     kb.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_products", icon_custom_emoji_id="5893057118545646106")])
@@ -5470,7 +5470,7 @@ async def cb_partner_program(cb: types.CallbackQuery):
             f"<blockquote>Зарегистрируйтесь как партнёр и получайте бонусы за каждого приглашённого покупателя!</blockquote>"
         )
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🚀 Стать партнёром", callback_data="become_partner", icon_custom_emoji_id="5445284980978621387")],
+            [InlineKeyboardButton(text="Стать партнёром", callback_data="become_partner", icon_custom_emoji_id="5445284980978621387")],
             [InlineKeyboardButton(text="‹ Назад", callback_data="profile_view", icon_custom_emoji_id="5893057118545646106")],
         ])
     try:
@@ -5483,7 +5483,7 @@ async def cb_partner_program(cb: types.CallbackQuery):
 async def cb_become_partner(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(PartnerSt.choose_ref)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎲 Сгенерировать автоматически", callback_data="partner_autoref", icon_custom_emoji_id="5472164874886846699")],
+        [InlineKeyboardButton(text="Сгенерировать автоматически", callback_data="partner_autoref", icon_custom_emoji_id="5472164874886846699")],
         [InlineKeyboardButton(text="Ввести свой код", callback_data="partner_customref", icon_custom_emoji_id="5870676941614354370")],
         [InlineKeyboardButton(text="‹ Назад", callback_data="partner_program", icon_custom_emoji_id="5893057118545646106")],
     ])
@@ -5583,7 +5583,7 @@ async def cb_partner_set_bonuses(cb: types.CallbackQuery):
     kb_rows = []
     for label, val in BUYER_BONUS_OPTIONS_NEW:
         kb_rows.append([InlineKeyboardButton(
-            text="🆕 {label}",
+            text=f"Новые — {label}",
             callback_data=f"pbonus_new_{json.dumps(val, separators=(',', ':'))}"
         )])
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="partner_program", icon_custom_emoji_id="5893057118545646106")])
@@ -5609,7 +5609,7 @@ async def cb_pbonus_new(cb: types.CallbackQuery):
     kb_rows = []
     for label, val in BUYER_BONUS_OPTIONS_REPEAT:
         kb_rows.append([InlineKeyboardButton(
-            text="🔄 {label}",
+            text=f"Повторные — {label}",
             callback_data=f"pbonus_rep_{json.dumps(val, separators=(',', ':'))}_{json.dumps(bonus_new, separators=(',', ':'))}"
         )])
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="partner_set_bonuses", icon_custom_emoji_id="5893057118545646106")])
@@ -5695,7 +5695,7 @@ async def cb_adm_roles(cb: types.CallbackQuery):
         uname = f"@{r['username']}" if r.get('username') else str(r['user_id'])
         rlabel = ROLES.get(r['role'], r['role'])
         kb_rows.append([InlineKeyboardButton(
-            text="{rlabel} — {uname}",
+            text=f"{rlabel} — {uname}",
             callback_data=f"adm_role_edit_{r['user_id']}"
         )])
     kb_rows.append([InlineKeyboardButton(text="Назначить роль", callback_data="adm_role_assign", icon_custom_emoji_id="5870633910337015697")])
@@ -5744,7 +5744,7 @@ async def proc_role_user_id(msg: types.Message, state: FSMContext):
     for role_key, role_label in ROLES.items():
         mark = "✓ " if current_role == role_key else ""
         kb_rows.append([InlineKeyboardButton(
-            text="{mark}{role_label}",
+            text=f"{mark}{role_label}",
             callback_data=f"setrole_{uid}_{role_key}"
         )])
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_roles", icon_custom_emoji_id="5893057118545646106")])
@@ -5797,7 +5797,7 @@ async def cb_adm_role_edit(cb: types.CallbackQuery):
     for role_key, role_label in ROLES.items():
         mark = "✓ " if current_role == role_key else ""
         kb_rows.append([InlineKeyboardButton(
-            text="{mark}{role_label}",
+            text=f"{mark}{role_label}",
             callback_data=f"setrole_{uid}_{role_key}"
         )])
     kb_rows.append([InlineKeyboardButton(text="‹ Назад к пользователю", callback_data=f"adm_user_{uid}", icon_custom_emoji_id="5893057118545646106")])
@@ -5895,7 +5895,7 @@ async def cb_adm_pbon_new(cb: types.CallbackQuery):
     kb_rows = []
     for label, val in BONUS_OPTIONS_NEW:
         kb_rows.append([InlineKeyboardButton(
-            text="🆕 {label}",
+            text=f"Новые — {label}",
             callback_data=f"adm_pset_new_{uid}_{json.dumps(val)}"
         )])
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data=f"adm_partner_{uid}", icon_custom_emoji_id="5893057118545646106")])
@@ -5915,7 +5915,7 @@ async def cb_adm_pbon_rep(cb: types.CallbackQuery):
     kb_rows = []
     for label, val in BONUS_OPTIONS_REPEAT:
         kb_rows.append([InlineKeyboardButton(
-            text="🔄 {label}",
+            text=f"Повторные — {label}",
             callback_data=f"adm_pset_rep_{uid}_{json.dumps(val)}"
         )])
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data=f"adm_partner_{uid}", icon_custom_emoji_id="5893057118545646106")])
@@ -5980,7 +5980,7 @@ async def cb_adm_drops(cb: types.CallbackQuery):
         now    = datetime.now().isoformat()
         status = "🔥" if (d['is_active'] and d['start_at'] <= now) else ("⏳" if d['is_active'] else "❌")
         kb_rows.append([
-            InlineKeyboardButton(text="{status} {d['name']}", callback_data=f"adm_drop_{d['id']}"),
+            InlineKeyboardButton(text=f"{status} {d['name']}", callback_data=f"adm_drop_{d['id']}"),
             InlineKeyboardButton(text=" ", callback_data=f"del_drop_{d['id']}"),
         ])
     kb_rows.append([InlineKeyboardButton(text="Добавить дроп", callback_data="add_drop", icon_custom_emoji_id="5420315771991497307")])
@@ -6010,7 +6010,7 @@ async def cb_add_drop(cb: types.CallbackQuery, state: FSMContext):
     if not admin_guard(cb.from_user.id):
         return
     cats = await get_all_categories()
-    kb_rows = [[InlineKeyboardButton(text="{c['name']}", callback_data=f"drop_cat_{c['id']}")] for c in cats]
+    kb_rows = [[InlineKeyboardButton(text=f"{c['name']}", callback_data=f"drop_cat_{c['id']}")] for c in cats]
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_drops", icon_custom_emoji_id="5893057118545646106")])
     try:
         await cb.message.edit_text(
