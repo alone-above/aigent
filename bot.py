@@ -18,7 +18,7 @@ from aiogram import Bot, Dispatcher, types, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton,
-    ReplyKeyboardMarkup, KeyboardButton,
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
     ContentType, BotCommand, BotCommandScopeChat,
 )
 from aiogram.fsm.context import FSMContext
@@ -135,25 +135,59 @@ dp.include_router(router)
 #  Анимированные эмодзи
 # ══════════════════════════════════════════════
 AE = {
-    "shop":    '<tg-emoji emoji-id="5373052667671093676">🛍</tg-emoji>',
-    "down":    '<tg-emoji emoji-id="5470177992950946662">👇</tg-emoji>',
-    "folder":  '<tg-emoji emoji-id="5433653135799228968">📁</tg-emoji>',
-    "money":   '<tg-emoji emoji-id="5472030678633684592">💸</tg-emoji>',
-    "cart":    '<tg-emoji emoji-id="5431499171045581032">🛒</tg-emoji>',
-    "cal":     '<tg-emoji emoji-id="5431897022456145283">📆</tg-emoji>',
-    "archive": '<tg-emoji emoji-id="5431736674147114227">🗂</tg-emoji>',
-    "store":   '<tg-emoji emoji-id="5265105755677159697">🏬</tg-emoji>',
-    "support": '<tg-emoji emoji-id="5467666648263564704">❓</tg-emoji>',
-    "star":    '<tg-emoji emoji-id="5368324170671202286">⭐</tg-emoji>',
-    "truck":   '<tg-emoji emoji-id="5431736674147114227">🚚</tg-emoji>',
-    "box":     '<tg-emoji emoji-id="5298487770510020895">💤</tg-emoji>',
-    "size":    '<tg-emoji emoji-id="5400250414929041085">⚖️</tg-emoji>',
-    "phone":   '<tg-emoji emoji-id="5467539229468793355">📞</tg-emoji>',
-    "tag":     '<tg-emoji emoji-id="5890883384057533697">🏷</tg-emoji>',
-    "gift":    '<tg-emoji emoji-id="5199749070830197566">🎁</tg-emoji>',
-    "pin":     '<tg-emoji emoji-id="5983099415689171511">📍</tg-emoji>',
-    "user":    '<tg-emoji emoji-id="5373012449597335010">👤</tg-emoji>',
-    "promo":   '<tg-emoji emoji-id="5368324170671202286">🎟</tg-emoji>',
+    "shop":     '<tg-emoji emoji-id="5373052667671093676">🛍</tg-emoji>',
+    "down":     '<tg-emoji emoji-id="5470177992950946662">👇</tg-emoji>',
+    "folder":   '<tg-emoji emoji-id="5433653135799228968">📁</tg-emoji>',
+    "money":    '<tg-emoji emoji-id="5472030678633684592">💸</tg-emoji>',
+    "cart":     '<tg-emoji emoji-id="5431499171045581032">🛒</tg-emoji>',
+    "cal":      '<tg-emoji emoji-id="5431897022456145283">📆</tg-emoji>',
+    "archive":  '<tg-emoji emoji-id="5431736674147114227">🗂</tg-emoji>',
+    "store":    '<tg-emoji emoji-id="5265105755677159697">🏬</tg-emoji>',
+    "support":  '<tg-emoji emoji-id="5467666648263564704">❓</tg-emoji>',
+    "star":     '<tg-emoji emoji-id="5368324170671202286">⭐</tg-emoji>',
+    "truck":    '<tg-emoji emoji-id="5431736674147114227">🚚</tg-emoji>',
+    "box":      '<tg-emoji emoji-id="5298487770510020895">💤</tg-emoji>',
+    "size":     '<tg-emoji emoji-id="5400250414929041085">⚖️</tg-emoji>',
+    "phone":    '<tg-emoji emoji-id="5467539229468793355">📞</tg-emoji>',
+    "tag":      '<tg-emoji emoji-id="5890883384057533697">🏷</tg-emoji>',
+    "gift":     '<tg-emoji emoji-id="5199749070830197566">🎁</tg-emoji>',
+    "pin":      '<tg-emoji emoji-id="5983099415689171511">📍</tg-emoji>',
+    "user":     '<tg-emoji emoji-id="5373012449597335010">👤</tg-emoji>',
+    "promo":    '<tg-emoji emoji-id="5368324170671202286">🎟</tg-emoji>',
+    # Новые
+    "heart":    '<tg-emoji emoji-id="5449505950283078474">❤️</tg-emoji>',
+    "heart_w":  '<tg-emoji emoji-id="5451714942157724312">🤍</tg-emoji>',
+    "fire":     '<tg-emoji emoji-id="5420315771991497307">🔥</tg-emoji>',
+    "diamond":  '<tg-emoji emoji-id="5471952986970267163">💎</tg-emoji>',
+    "crown":    '<tg-emoji emoji-id="5467406098367521267">👑</tg-emoji>',
+    "ok":       '<tg-emoji emoji-id="5427009714745517609">✅</tg-emoji>',
+    "no":       '<tg-emoji emoji-id="5465665476971471368">❌</tg-emoji>',
+    "plus":     '<tg-emoji emoji-id="5226945370684140473">➕</tg-emoji>',
+    "minus":    '<tg-emoji emoji-id="5229113891081956317">➖</tg-emoji>',
+    "search":   '<tg-emoji emoji-id="5188311512791393083">🔎</tg-emoji>',
+    "home":     '<tg-emoji emoji-id="5465226866321268133">🏠</tg-emoji>',
+    "sparkle":  '<tg-emoji emoji-id="5472164874886846699">✨</tg-emoji>',
+    "stars":    '<tg-emoji emoji-id="5458799228719472718">🌟</tg-emoji>',
+    "rocket":   '<tg-emoji emoji-id="5445284980978621387">🚀</tg-emoji>',
+    "trophy":   '<tg-emoji emoji-id="5409008750893734809">🏆</tg-emoji>',
+    "chat":     '<tg-emoji emoji-id="5465300082628763143">💬</tg-emoji>',
+    "bell":     '<tg-emoji emoji-id="5242628160297641831">🔔</tg-emoji>',
+    "note":     '<tg-emoji emoji-id="5334882760735598374">📝</tg-emoji>',
+    "bag":      '<tg-emoji emoji-id="5380056101473492248">👜</tg-emoji>',
+    "coin":     '<tg-emoji emoji-id="5379600444098093058">🪙</tg-emoji>',
+    "cash":     '<tg-emoji emoji-id="5375296873982604963">💰</tg-emoji>',
+    "key":      '<tg-emoji emoji-id="5330115548900501467">🔑</tg-emoji>',
+    "refresh":  '<tg-emoji emoji-id="5264727218734524899">🔄</tg-emoji>',
+    "confetti": '<tg-emoji emoji-id="5436040291507247633">🎉</tg-emoji>',
+    "ribbon":   '<tg-emoji emoji-id="5375152498656961898">🎀</tg-emoji>',
+    "chart":    '<tg-emoji emoji-id="5431577498364158238">📊</tg-emoji>',
+    "link":     '<tg-emoji emoji-id="5375129357373165375">🔗</tg-emoji>',
+    "medal":    '<tg-emoji emoji-id="5334644364280866007">🏅</tg-emoji>',
+    "wand":     '<tg-emoji emoji-id="5260426225599405269">🪄</tg-emoji>',
+    "bulb":     '<tg-emoji emoji-id="5472146462362048818">💡</tg-emoji>',
+    "mobile":   '<tg-emoji emoji-id="5407025283456835913">📱</tg-emoji>',
+    "msg":      '<tg-emoji emoji-id="5472019095106886003">💌</tg-emoji>',
+    "rainbow":  '<tg-emoji emoji-id="5427042798878610107">🌈</tg-emoji>',
 }
 def ae(k): return AE.get(k, "")
 
@@ -444,6 +478,21 @@ async def init_db():
             media_type TEXT DEFAULT '',
             file_id    TEXT DEFAULT ''
         );
+        CREATE TABLE IF NOT EXISTS cart (
+            id          SERIAL PRIMARY KEY,
+            user_id     BIGINT NOT NULL,
+            product_id  INTEGER NOT NULL,
+            size        TEXT DEFAULT 'ONE_SIZE',
+            added_at    TEXT,
+            UNIQUE(user_id, product_id, size)
+        );
+        CREATE TABLE IF NOT EXISTS wishlist (
+            id          SERIAL PRIMARY KEY,
+            user_id     BIGINT NOT NULL,
+            product_id  INTEGER NOT NULL,
+            added_at    TEXT,
+            UNIQUE(user_id, product_id)
+        );
         """)
         # Миграции — добавить колонки если нет
         for col_sql in [
@@ -553,10 +602,14 @@ async def add_category(name: str, parent_id: int = 0):
 
 async def del_category(cid: int):
     await db_run('UPDATE products SET is_active=0 WHERE category_id=$1', (cid,))
+    await db_run('DELETE FROM cart WHERE product_id IN (SELECT id FROM products WHERE category_id=$1)', (cid,))
+    await db_run('DELETE FROM wishlist WHERE product_id IN (SELECT id FROM products WHERE category_id=$1)', (cid,))
     # Also delete subcategories
     subcats = await db_all('SELECT id FROM categories WHERE parent_id=$1', (cid,))
     for sc in subcats:
         await db_run('UPDATE products SET is_active=0 WHERE category_id=$1', (sc['id'],))
+        await db_run('DELETE FROM cart WHERE product_id IN (SELECT id FROM products WHERE category_id=$1)', (sc['id'],))
+        await db_run('DELETE FROM wishlist WHERE product_id IN (SELECT id FROM products WHERE category_id=$1)', (sc['id'],))
         await db_run('DELETE FROM categories WHERE id=$1', (sc['id'],))
     await db_run('DELETE FROM categories WHERE id=$1', (cid,))
     _cache_invalidate("categories", "products")
@@ -612,6 +665,9 @@ async def update_product_field(pid: int, field: str, value):
 
 async def del_product(pid: int):
     await db_run('UPDATE products SET is_active=0 WHERE id=$1', (pid,))
+    # Удаляем навсегда из корзин и избранного всех пользователей
+    await db_run('DELETE FROM cart WHERE product_id=$1', (pid,))
+    await db_run('DELETE FROM wishlist WHERE product_id=$1', (pid,))
     _cache_invalidate("products", f"product:{pid}")
 
 async def reduce_stock(pid: int):
@@ -869,6 +925,80 @@ async def add_purchase(uid, pid, price, method='crypto'):
         'UPDATE users SET total_purchases=total_purchases+1, total_spent=total_spent+$1 WHERE user_id=$2',
         (price, uid)
     )
+
+# ══════════════════════════════════════════════
+#  Корзина
+# ══════════════════════════════════════════════
+async def cart_add(uid: int, pid: int, size: str) -> bool:
+    """Добавить товар в корзину. Возвращает True если добавлен, False если уже есть."""
+    try:
+        await db_run(
+            'INSERT INTO cart(user_id,product_id,size,added_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',
+            (uid, pid, size, datetime.now().isoformat())
+        )
+        return True
+    except Exception:
+        return False
+
+async def cart_remove(uid: int, pid: int, size: str):
+    await db_run('DELETE FROM cart WHERE user_id=$1 AND product_id=$2 AND size=$3', (uid, pid, size))
+
+async def cart_get(uid: int) -> list:
+    return await db_all(
+        '''SELECT c.id, c.product_id, c.size, c.added_at,
+                  p.name, p.price, p.stock, p.card_file_id, p.card_media_type, p.is_active
+           FROM cart c
+           JOIN products p ON p.id = c.product_id
+           WHERE c.user_id=$1
+           ORDER BY c.added_at DESC''',
+        (uid,)
+    )
+
+async def cart_clear(uid: int):
+    await db_run('DELETE FROM cart WHERE user_id=$1', (uid,))
+
+async def cart_count(uid: int) -> int:
+    r = await db_one('SELECT COUNT(*) AS cnt FROM cart WHERE user_id=$1', (uid,))
+    return r['cnt'] if r else 0
+
+async def cart_has(uid: int, pid: int, size: str) -> bool:
+    r = await db_one('SELECT 1 FROM cart WHERE user_id=$1 AND product_id=$2 AND size=$3', (uid, pid, size))
+    return bool(r)
+
+# ══════════════════════════════════════════════
+#  Избранное
+# ══════════════════════════════════════════════
+async def wish_add(uid: int, pid: int) -> bool:
+    try:
+        await db_run(
+            'INSERT INTO wishlist(user_id,product_id,added_at) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',
+            (uid, pid, datetime.now().isoformat())
+        )
+        return True
+    except Exception:
+        return False
+
+async def wish_remove(uid: int, pid: int):
+    await db_run('DELETE FROM wishlist WHERE user_id=$1 AND product_id=$2', (uid, pid))
+
+async def wish_get(uid: int) -> list:
+    return await db_all(
+        '''SELECT w.product_id, w.added_at,
+                  p.name, p.price, p.stock, p.card_file_id, p.card_media_type, p.is_active
+           FROM wishlist w
+           JOIN products p ON p.id = w.product_id
+           WHERE w.user_id=$1
+           ORDER BY w.added_at DESC''',
+        (uid,)
+    )
+
+async def wish_has(uid: int, pid: int) -> bool:
+    r = await db_one('SELECT 1 FROM wishlist WHERE user_id=$1 AND product_id=$2', (uid, pid))
+    return bool(r)
+
+async def wish_count(uid: int) -> int:
+    r = await db_one('SELECT COUNT(*) AS cnt FROM wishlist WHERE user_id=$1', (uid,))
+    return r['cnt'] if r else 0
     _cache_invalidate(f"user:{uid}")
 
 # ══════════════════════════════════════════════
@@ -1136,10 +1266,15 @@ def order_status_text(status: str) -> str:
 #  Клавиатуры
 # ══════════════════════════════════════════════
 def kb_main():
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="🛒 Купить"), KeyboardButton(text="👤 Профиль")],
-        [KeyboardButton(text="🏬 О магазине"), KeyboardButton(text="❓ Поддержка")],
-    ], resize_keyboard=True)
+    """Главное инлайн-меню. Больше нет Reply-клавиатуры — всё через инлайн."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{ae('shop')} Каталог",      callback_data="shop"),
+         InlineKeyboardButton(text=f"{ae('user')} Профиль",      callback_data="profile_view")],
+        [InlineKeyboardButton(text=f"{ae('cart')} Корзина",      callback_data="my_cart"),
+         InlineKeyboardButton(text=f"{ae('heart')} Избранное",   callback_data="my_wishlist")],
+        [InlineKeyboardButton(text=f"{ae('store')} О магазине",  callback_data="about"),
+         InlineKeyboardButton(text=f"{ae('support')} Поддержка", callback_data="support")],
+    ])
 
 def kb_back(cd="main"):
     return InlineKeyboardMarkup(inline_keyboard=[[
@@ -1249,7 +1384,12 @@ async def cmd_start(msg: types.Message, state: FSMContext):
     await log_event("start", msg.from_user.id)
     welcome_text = await get_bot_msg('welcome')
     text = welcome_text.replace('{shop_name}', SHOP_NAME)
-    full_text = f"{ae('shop')} <b>{SHOP_NAME}</b>\n\n<blockquote>{text}</blockquote>"
+    full_text = (
+        f"{ae('sparkle')} <b>{SHOP_NAME}</b>\n\n"
+        f"<blockquote>{ae('down')} {text}</blockquote>"
+    )
+    # Удаляем Reply-клавиатуру если была, показываем инлайн
+    await msg.answer("‌", reply_markup=ReplyKeyboardRemove())  # невидимый символ
     await send_media(msg.chat.id, full_text, "main_menu", kb_main())
 
 @router.message(Command("admin"))
@@ -1257,18 +1397,23 @@ async def cmd_admin(msg: types.Message, state: FSMContext):
     if msg.from_user.id not in ADMIN_IDS:
         return
     await state.clear()
-    await send_media(msg.chat.id, "🎩 <b>Панель управления</b>", "admin_panel", kb_admin())
+    await send_media(msg.chat.id, f"{ae('crown')} <b>Панель управления</b>", "admin_panel", kb_admin())
 
 @router.callback_query(F.data == "main")
 async def cb_main(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
+    text = (
+        f"{ae('sparkle')} <b>{SHOP_NAME}</b>\n\n"
+        f"<blockquote>{ae('down')} Выберите нужный раздел:</blockquote>"
+    )
     try:
-        await cb.message.delete()
+        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb_main())
     except Exception:
-        pass
-    text = (f"{ae('shop')} <b>{SHOP_NAME}</b>\n\n"
-            f"<blockquote>{ae('down')} Выберите нужный раздел:</blockquote>")
-    await bot.send_message(cb.from_user.id, text, parse_mode="HTML", reply_markup=kb_main())
+        try:
+            await cb.message.delete()
+        except Exception:
+            pass
+        await bot.send_message(cb.from_user.id, text, parse_mode="HTML", reply_markup=kb_main())
     await cb.answer()
 
 # ══════════════════════════════════════════════
@@ -1541,8 +1686,439 @@ async def _finish_complaint(tg_user: types.User, state: FSMContext,
 
 
 # ══════════════════════════════════════════════
-#  Reply-кнопки
+#  КОРЗИНА
 # ══════════════════════════════════════════════
+async def _show_cart(uid: int, edit_msg=None, send_fn=None):
+    items = await cart_get(uid)
+    # Удаляем деактивированные товары навсегда
+    inactive = [i for i in items if not i.get('is_active', 1)]
+    for item in inactive:
+        await cart_remove(uid, item['product_id'], item['size'])
+    items = [i for i in items if i.get('is_active', 1)]
+
+    if not items:
+        text = (
+            f"{ae('cart')} <b>Ваша корзина пуста</b>\n\n"
+            f"<blockquote>Добавляйте товары кнопкой {ae('cart')} В корзину на карточке товара.</blockquote>"
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"{ae('shop')} Перейти в каталог", callback_data="shop")],
+            [InlineKeyboardButton(text="‹ Профиль", callback_data="profile_view")],
+        ])
+    else:
+        total = sum(i['price'] for i in items)
+        lines = []
+        for i in items:
+            avail = f"✅" if i['stock'] > 0 else f"{ae('no')} нет"
+            lines.append(f"• <b>{i['name']}</b>  [{i['size']}]  {fmt_price(i['price'])}  {avail}")
+
+        text = (
+            f"{ae('cart')} <b>Корзина</b>  ({len(items)} товар{'ов' if len(items)>4 else 'а' if len(items)>1 else ''})\n\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            + "\n".join(lines) +
+            f"\n━━━━━━━━━━━━━━━━━\n"
+            f"{ae('cash')} <b>Итого:</b>  <code>{fmt_price(total)}</code>"
+        )
+        kb_rows = []
+        for i in items:
+            kb_rows.append([
+                InlineKeyboardButton(
+                    text=f"🗑 {i['name']} [{i['size']}]",
+                    callback_data=f"cart_del_{i['product_id']}_{i['size']}"
+                )
+            ])
+        kb_rows.append([
+            InlineKeyboardButton(text=f"{ae('ok')} Оформить всё", callback_data="cart_checkout"),
+        ])
+        kb_rows.append([
+            InlineKeyboardButton(text=f"🗑 Очистить корзину", callback_data="cart_clear_confirm"),
+        ])
+        kb_rows.append([InlineKeyboardButton(text="‹ Профиль", callback_data="profile_view")])
+        kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
+
+    if edit_msg:
+        try:
+            await edit_msg.edit_text(text, parse_mode="HTML", reply_markup=kb)
+            return
+        except Exception:
+            pass
+    if send_fn:
+        await send_fn(text, parse_mode="HTML", reply_markup=kb)
+
+@router.callback_query(F.data == "my_cart")
+async def cb_my_cart(cb: types.CallbackQuery):
+    if await ban_check(cb.from_user.id, cb.message.answer): return
+    await _show_cart(cb.from_user.id, edit_msg=cb.message)
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("cart_add_"))
+async def cb_cart_add(cb: types.CallbackQuery):
+    pid = int(cb.data.split("_")[2])
+    p   = await get_product(pid)
+    if not p:
+        await cb.answer("Товар не найден", show_alert=True)
+        return
+    if not p.get('is_active', 1):
+        await cb.answer("Товар недоступен", show_alert=True)
+        return
+
+    sizes = parse_sizes(p)
+    if not sizes or sizes == ['ONE_SIZE']:
+        # Добавляем сразу без выбора размера
+        added = await cart_add(cb.from_user.id, pid, 'ONE_SIZE')
+        if added:
+            await cb.answer(f"✅ {p['name']} добавлен в корзину!", show_alert=False)
+        else:
+            await cb.answer("Уже в корзине", show_alert=False)
+        return
+
+    # Показываем выбор размера
+    kb_rows = [[InlineKeyboardButton(
+        text=f"📐 {s}", callback_data=f"cart_size_{pid}_{s}"
+    )] for s in sizes]
+    kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data=f"prod_{pid}")])
+    try:
+        await cb.message.edit_text(
+            f"{ae('cart')} <b>Выберите размер для корзины</b>\n\n"
+            f"<blockquote>Товар: <b>{p['name']}</b></blockquote>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
+        )
+    except Exception:
+        await cb.message.answer(
+            f"{ae('cart')} <b>Выберите размер</b>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
+        )
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("cart_size_"))
+async def cb_cart_size(cb: types.CallbackQuery):
+    parts = cb.data.split("_", 3)
+    pid, size = int(parts[2]), parts[3]
+    p = await get_product(pid)
+    added = await cart_add(cb.from_user.id, pid, size)
+    pname = p['name'] if p else str(pid)
+    if added:
+        await cb.answer(f"✅ {pname} [{size}] добавлен в корзину!", show_alert=False)
+    else:
+        await cb.answer("Уже в корзине", show_alert=False)
+    # Вернуть на карточку товара
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+    # Показываем карточку снова
+    fake_cb = types.CallbackQuery(
+        id=cb.id, from_user=cb.from_user, message=cb.message,
+        chat_instance=cb.chat_instance, data=f"prod_{pid}"
+    )
+    from aiogram.types import Message
+    await cb_prod(fake_cb)
+
+@router.callback_query(F.data.startswith("cart_del_"))
+async def cb_cart_del(cb: types.CallbackQuery):
+    parts = cb.data.split("_", 3)
+    pid, size = int(parts[2]), parts[3]
+    await cart_remove(cb.from_user.id, pid, size)
+    await cb.answer("🗑 Удалено из корзины")
+    await _show_cart(cb.from_user.id, edit_msg=cb.message)
+
+@router.callback_query(F.data == "cart_clear_confirm")
+async def cb_cart_clear_confirm(cb: types.CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{ae('ok')} Да, очистить", callback_data="cart_clear_do"),
+         InlineKeyboardButton(text=f"{ae('no')} Отмена",       callback_data="my_cart")],
+    ])
+    try:
+        await cb.message.edit_text(
+            f"{ae('cart')} <b>Очистить корзину?</b>\n\n"
+            f"<blockquote>Все товары будут удалены из корзины.</blockquote>",
+            parse_mode="HTML", reply_markup=kb
+        )
+    except Exception:
+        pass
+    await cb.answer()
+
+@router.callback_query(F.data == "cart_clear_do")
+async def cb_cart_clear_do(cb: types.CallbackQuery):
+    await cart_clear(cb.from_user.id)
+    await cb.answer("🗑 Корзина очищена")
+    await _show_cart(cb.from_user.id, edit_msg=cb.message)
+
+# ─── Оформление корзины целиком ───────────────
+class CartCheckoutSt(StatesGroup):
+    promo    = State()
+    confirm  = State()
+
+@router.callback_query(F.data == "cart_checkout")
+async def cb_cart_checkout(cb: types.CallbackQuery, state: FSMContext):
+    uid   = cb.from_user.id
+    items = await cart_get(uid)
+    items = [i for i in items if i.get('is_active', 1) and i['stock'] > 0]
+    if not items:
+        await cb.answer("Нет доступных товаров для оформления", show_alert=True)
+        await _show_cart(uid, edit_msg=cb.message)
+        return
+
+    total = sum(i['price'] for i in items)
+    user  = await get_user(uid)
+    lines = "\n".join(f"• <b>{i['name']}</b> [{i['size']}]  {fmt_price(i['price'])}" for i in items)
+
+    phone_s   = f"<code>{user['phone']}</code>" if user and user.get('phone') else "<i>не указан ❗</i>"
+    address_s = f"<i>{user['default_address']}</i>" if user and user.get('default_address') else "<i>не указан ❗</i>"
+
+    text = (
+        f"{ae('cart')} <b>Оформление корзины</b>\n\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"{lines}\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"{ae('cash')} <b>Итого:</b>  <code>{fmt_price(total)}</code>\n\n"
+        f"{ae('phone')} <b>Телефон:</b>  {phone_s}\n"
+        f"{ae('pin')} <b>Адрес:</b>  {address_s}\n\n"
+        f"<blockquote>Выберите способ оплаты для всей корзины:</blockquote>"
+    )
+    await state.update_data(cart_items=[{'pid': i['product_id'], 'size': i['size'], 'price': i['price'], 'name': i['name']} for i in items])
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎟 Применить промокод", callback_data="cart_promo")],
+        [InlineKeyboardButton(text="🏦 Оплатить Kaspi",     callback_data="cart_pay_kaspi")],
+        [InlineKeyboardButton(text="🔐 Оплатить CryptoBot", callback_data="cart_pay_crypto")],
+        [InlineKeyboardButton(text="‹ Назад",               callback_data="my_cart")],
+    ])
+    try:
+        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        await cb.message.answer(text, parse_mode="HTML", reply_markup=kb)
+    await cb.answer()
+
+@router.callback_query(F.data == "cart_promo")
+async def cb_cart_promo(cb: types.CallbackQuery, state: FSMContext):
+    await state.set_state(CartCheckoutSt.promo)
+    try:
+        await cb.message.edit_text(
+            f"🎟 <b>Введите промокод для корзины:</b>\n\n"
+            f"<blockquote>Промокод применится ко всей сумме заказа.</blockquote>",
+            parse_mode="HTML", reply_markup=kb_back("cart_checkout")
+        )
+    except Exception:
+        pass
+    await cb.answer()
+
+@router.message(CartCheckoutSt.promo)
+async def proc_cart_promo(msg: types.Message, state: FSMContext):
+    code  = msg.text.strip().upper()
+    promo, error = await validate_promo(code, msg.from_user.id)
+    if not promo:
+        await msg.answer(f"❌ {error or 'Промокод недействителен'}")
+        return
+    await state.update_data(cart_promo_code=code, cart_promo=promo)
+    await state.set_state(CartCheckoutSt.confirm)
+    d = await state.get_data()
+    items = d.get('cart_items', [])
+    total_orig = sum(i['price'] for i in items)
+    total_disc, discount, info = apply_promo_to_price(total_orig, promo)
+    await msg.answer(
+        f"✅ Промокод <code>{code}</code> применён!\n"
+        f"{ae('cash')} Скидка: {fmt_price(discount)}\n"
+        f"<b>Итого со скидкой: {fmt_price(total_disc)}</b>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏦 Kaspi",     callback_data="cart_pay_kaspi")],
+            [InlineKeyboardButton(text="🔐 CryptoBot", callback_data="cart_pay_crypto")],
+            [InlineKeyboardButton(text="‹ Корзина",    callback_data="my_cart")],
+        ])
+    )
+
+async def _cart_process_payment(cb: types.CallbackQuery, state: FSMContext, method: str):
+    """Создаёт отдельный заказ на каждый товар из корзины."""
+    uid   = cb.from_user.id
+    d     = await state.get_data()
+    items = d.get('cart_items', [])
+    if not items:
+        items_db = await cart_get(uid)
+        items = [{'pid': i['product_id'], 'size': i['size'], 'price': i['price'], 'name': i['name']}
+                 for i in items_db if i.get('is_active',1) and i['stock'] > 0]
+
+    promo_code = d.get('cart_promo_code', '')
+    promo      = d.get('cart_promo')
+    await state.clear()
+
+    user       = await get_user(uid)
+    uname      = cb.from_user.username or ''
+    fname      = cb.from_user.first_name or ''
+    total_orig = sum(i['price'] for i in items)
+    discount   = 0
+    total      = total_orig
+
+    if promo and promo_code:
+        total, discount, _ = apply_promo_to_price(total_orig, promo)
+
+    oids = []
+    for item in items:
+        # Пропорциональная скидка на каждый товар
+        item_price = item['price']
+        item_disc  = round(item['price'] / total_orig * discount, 2) if total_orig > 0 else 0
+        item_final = max(0, item_price - item_disc)
+        oid = await create_order(uid, uname, fname, item['pid'], item['size'],
+                                 item_final, method, user['phone'] if user else '',
+                                 user['default_address'] if user else '',
+                                 promo_code, item_disc)
+        await add_purchase(uid, item['pid'], item_final, method)
+        await reduce_stock(item['pid'])
+        oids.append(oid)
+
+    if promo_code:
+        promo_row = await get_promo_by_code(promo_code)
+        if promo_row:
+            await use_promo(uid, promo_row['id'], oids[0] if oids else 0)
+
+    await cart_clear(uid)
+    await log_event("cart_purchase", uid, f"orders={oids},method={method},total={total}")
+
+    oids_str = ', '.join(f'#{o}' for o in oids)
+    text = (
+        f"{ae('confetti')} <b>Заказы оформлены!</b>\n\n"
+        f"📋 <b>Номера заказов:</b> {oids_str}\n"
+        f"{ae('cash')} <b>Итого:</b> {fmt_price(total)}\n"
+        f"💳 <b>Способ:</b> {'Kaspi' if method=='kaspi' else 'CryptoBot'}\n\n"
+        f"<blockquote>Менеджер свяжется с вами для подтверждения.</blockquote>"
+    )
+    # Уведомляем менеджера о каждом заказе
+    for i, oid in enumerate(oids):
+        item = items[i] if i < len(items) else {}
+        p    = await get_product(item.get('pid', 0))
+        try:
+            await _notify_manager_new_order(
+                oid, uid, uname, fname, p, item.get('size', ''),
+                item.get('price', 0), method,
+                user['phone'] if user else '', user['default_address'] if user else '',
+                promo_code if i == 0 else '', item_disc if i == 0 else 0
+            )
+        except Exception:
+            pass
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{ae('cart')} Мои заказы", callback_data="my_orders")],
+        [InlineKeyboardButton(text=f"{ae('home')} Главное меню", callback_data="main")],
+    ])
+    try:
+        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        await cb.message.answer(text, parse_mode="HTML", reply_markup=kb)
+    await cb.answer("✅ Оформлено!")
+
+@router.callback_query(F.data == "cart_pay_kaspi")
+async def cb_cart_pay_kaspi(cb: types.CallbackQuery, state: FSMContext):
+    await _cart_process_payment(cb, state, 'kaspi')
+
+@router.callback_query(F.data == "cart_pay_crypto")
+async def cb_cart_pay_crypto(cb: types.CallbackQuery, state: FSMContext):
+    await _cart_process_payment(cb, state, 'crypto')
+
+# ══════════════════════════════════════════════
+#  ИЗБРАННОЕ
+# ══════════════════════════════════════════════
+async def _show_wishlist(uid: int, edit_msg=None, send_fn=None):
+    items = await wish_get(uid)
+    # Удаляем деактивированные товары навсегда
+    inactive = [i for i in items if not i.get('is_active', 1)]
+    for item in inactive:
+        await wish_remove(uid, item['product_id'])
+    items = [i for i in items if i.get('is_active', 1)]
+
+    if not items:
+        text = (
+            f"{ae('heart')} <b>Избранное пусто</b>\n\n"
+            f"<blockquote>Нажимайте {ae('heart')} Избранное на карточке товара, чтобы сохранить понравившиеся вещи.</blockquote>"
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"{ae('shop')} В каталог", callback_data="shop")],
+            [InlineKeyboardButton(text="‹ Профиль", callback_data="profile_view")],
+        ])
+    else:
+        lines = []
+        for i in items:
+            avail = "✅" if i['stock'] > 0 else "❌"
+            lines.append(f"• <b>{i['name']}</b>  {fmt_price(i['price'])}  {avail}")
+
+        text = (
+            f"{ae('heart')} <b>Избранное</b>  ({len(items)} товар{'ов' if len(items)>4 else 'а' if len(items)>1 else ''})\n\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            + "\n".join(lines) +
+            f"\n━━━━━━━━━━━━━━━━━"
+        )
+        kb_rows = []
+        for i in items:
+            kb_rows.append([
+                InlineKeyboardButton(text=f"👁 {i['name']}", callback_data=f"prod_{i['product_id']}"),
+                InlineKeyboardButton(text=f"💔 Убрать",      callback_data=f"wish_rm_{i['product_id']}"),
+            ])
+        kb_rows.append([InlineKeyboardButton(text="‹ Профиль", callback_data="profile_view")])
+        kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
+
+    if edit_msg:
+        try:
+            await edit_msg.edit_text(text, parse_mode="HTML", reply_markup=kb)
+            return
+        except Exception:
+            pass
+    if send_fn:
+        await send_fn(text, parse_mode="HTML", reply_markup=kb)
+
+@router.callback_query(F.data == "my_wishlist")
+async def cb_my_wishlist(cb: types.CallbackQuery):
+    if await ban_check(cb.from_user.id, cb.message.answer): return
+    await _show_wishlist(cb.from_user.id, edit_msg=cb.message)
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("wish_toggle_"))
+async def cb_wish_toggle(cb: types.CallbackQuery):
+    pid = int(cb.data.split("_")[2])
+    uid = cb.from_user.id
+    p   = await get_product(pid)
+    if not p:
+        await cb.answer("Товар не найден", show_alert=True)
+        return
+
+    if await wish_has(uid, pid):
+        await wish_remove(uid, pid)
+        await cb.answer("💔 Убрано из избранного")
+    else:
+        await wish_add(uid, pid)
+        await cb.answer(f"❤️ Добавлено в избранное!")
+
+@router.callback_query(F.data.startswith("wish_rm_"))
+async def cb_wish_rm(cb: types.CallbackQuery):
+    pid = int(cb.data.split("_")[2])
+    await wish_remove(cb.from_user.id, pid)
+    await cb.answer("💔 Убрано из избранного")
+    await _show_wishlist(cb.from_user.id, edit_msg=cb.message)
+
+
+# ══════════════════════════════════════════════
+#  Reply-кнопки (оставляем для совместимости) + Инлайн «main»
+# ══════════════════════════════════════════════
+@router.callback_query(F.data == "about")
+async def cb_about(cb: types.CallbackQuery):
+    if await ban_check(cb.from_user.id, cb.message.answer): return
+    info = await get_setting("shop_info", "Информация о магазине пока не заполнена.")
+    text = f"{ae('store')} <b>О магазине</b>\n\n<blockquote>{info}</blockquote>"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{ae('link')} Партнёрство", callback_data="partnership")],
+        [InlineKeyboardButton(text="‹ Главное меню", callback_data="main")],
+    ])
+    try:
+        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        await send_media(cb.from_user.id, text, "about_menu", kb)
+    await cb.answer()
+
+@router.callback_query(F.data == "support")
+async def cb_support_inline(cb: types.CallbackQuery):
+    if await ban_check(cb.from_user.id, cb.message.answer): return
+    await _show_support(cb.from_user.id)
+    await cb.answer()
+
 @router.message(F.text == "🛒 Купить")
 async def txt_shop(msg: types.Message):
     if await ban_check(msg.from_user.id, msg.answer): return
@@ -1622,24 +2198,29 @@ def _profile_text(tg_user: types.User, user, role: str = 'buyer') -> str:
         f"{ae('user')} <b>Профиль</b>\n\n"
         f"━━━━━━━━━━━━━━━━━\n"
         f"🆔 <b>ID:</b> <code>{tg_user.id}</code>\n"
-        f"{ae('user')} <b>Имя:</b> {tg_user.first_name or '—'}\n"
-        f"💬 <b>Username:</b> {uname}\n"
-        f"👑 <b>Роль:</b> {role_label}\n\n"
+        f"{ae('sparkle')} <b>Имя:</b> {tg_user.first_name or '—'}\n"
+        f"{ae('chat')} <b>Username:</b> {uname}\n"
+        f"{ae('crown')} <b>Роль:</b> {role_label}\n\n"
         f"{ae('phone')} <b>Телефон:</b> <code>{phone}</code>\n"
         f"{ae('pin')} <b>Адрес доставки:</b>\n  <i>{address}</i>\n\n"
+        f"━━━━━━━━━━━━━━━━━\n"
         f"{ae('cart')} <b>Заказов:</b> {user['total_purchases']}\n"
-        f"{ae('money')} <b>Потрачено:</b> {fmt_price(user['total_spent'])}\n"
-        f"{ae('gift')} <b>Бонусный баланс:</b> {fmt_price(user['bonus_balance'])}\n"
+        f"{ae('cash')} <b>Потрачено:</b> {fmt_price(user['total_spent'])}\n"
+        f"{ae('coin')} <b>Бонусный баланс:</b> {fmt_price(user['bonus_balance'])}\n"
         f"{ae('cal')} <b>Регистрация:</b> {user['registered_at'][:10]}\n"
         f"━━━━━━━━━━━━━━━━━"
     )
 
-def _profile_kb() -> InlineKeyboardMarkup:
+def _profile_kb(cart_cnt: int = 0, wish_cnt: int = 0) -> InlineKeyboardMarkup:
+    cart_label = f"{ae('cart')} Корзина" + (f" ({cart_cnt})" if cart_cnt else "")
+    wish_label = f"{ae('heart')} Избранное" + (f" ({wish_cnt})" if wish_cnt else "")
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📞 Телефон", callback_data="profile_phone"),
-         InlineKeyboardButton(text="📍 Адрес", callback_data="profile_address")],
-        [InlineKeyboardButton(text="📦 Мои заказы", callback_data="my_orders")],
-        [InlineKeyboardButton(text="🤝 Партнёрская программа", callback_data="partner_program")],
+        [InlineKeyboardButton(text=cart_label,  callback_data="my_cart"),
+         InlineKeyboardButton(text=wish_label,  callback_data="my_wishlist")],
+        [InlineKeyboardButton(text=f"{ae('phone')} Телефон", callback_data="profile_phone"),
+         InlineKeyboardButton(text=f"{ae('pin')} Адрес",     callback_data="profile_address")],
+        [InlineKeyboardButton(text=f"{ae('cart')} Мои заказы",         callback_data="my_orders")],
+        [InlineKeyboardButton(text=f"{ae('link')} Партнёрская программа", callback_data="partner_program")],
     ])
 
 async def _send_profile(tg_user: types.User, user, send_fn=None, edit_msg=None):
@@ -1647,9 +2228,11 @@ async def _send_profile(tg_user: types.User, user, send_fn=None, edit_msg=None):
         if send_fn:
             await send_fn("⏳ Профиль создаётся, попробуйте снова.", parse_mode="HTML")
         return
-    role = await get_user_role(tg_user.id)
-    text = _profile_text(tg_user, user, role)
-    kb   = _profile_kb()
+    role      = await get_user_role(tg_user.id)
+    cart_cnt  = await cart_count(tg_user.id)
+    wish_cnt  = await wish_count(tg_user.id)
+    text      = _profile_text(tg_user, user, role)
+    kb        = _profile_kb(cart_cnt, wish_cnt)
     if edit_msg:
         try:
             await edit_msg.edit_text(text, parse_mode="HTML", reply_markup=kb)
@@ -1843,13 +2426,12 @@ async def show_catalog(chat_id: int):
     upcoming = await get_upcoming_drops()
     kb_rows = []
     for c in cats:
-        # Check if has subcategories
         subcats = await get_categories(parent_id=c['id'])
-        icon = "📂" if subcats else "🗂"
+        icon = ae('folder') if subcats else ae('shop')
         kb_rows.append([InlineKeyboardButton(text=f"{icon} {c['name']}", callback_data=f"cat_{c['id']}")])
-    # Дропы видны только если есть активные или предстоящие
     if drops or upcoming:
-        kb_rows.append([InlineKeyboardButton(text="🔥 Дропы", callback_data="drops_menu")])
+        kb_rows.append([InlineKeyboardButton(text=f"{ae('fire')} Дропы", callback_data="drops_menu")])
+    kb_rows.append([InlineKeyboardButton(text=f"‹ Главное меню", callback_data="main")])
     if not kb_rows:
         await bot.send_message(chat_id, "📭 Категории пока не добавлены.")
         return
@@ -1858,16 +2440,18 @@ async def show_catalog(chat_id: int):
 
 @router.callback_query(F.data == "shop")
 async def cb_shop(cb: types.CallbackQuery):
+    if await ban_check(cb.from_user.id, cb.message.answer): return
     cats = await get_categories(parent_id=0)
     drops = await get_active_drops()
     upcoming = await get_upcoming_drops()
     kb_rows = []
     for c in cats:
         subcats = await get_categories(parent_id=c['id'])
-        icon = "📂" if subcats else "🗂"
+        icon = ae('folder') if subcats else ae('shop')
         kb_rows.append([InlineKeyboardButton(text=f"{icon} {c['name']}", callback_data=f"cat_{c['id']}")])
     if drops or upcoming:
-        kb_rows.append([InlineKeyboardButton(text="🔥 Дропы", callback_data="drops_menu")])
+        kb_rows.append([InlineKeyboardButton(text=f"{ae('fire')} Дропы", callback_data="drops_menu")])
+    kb_rows.append([InlineKeyboardButton(text="‹ Главное меню", callback_data="main")])
     if not kb_rows:
         await cb.answer("Категории пока не добавлены", show_alert=True)
         return
@@ -1975,15 +2559,13 @@ async def cb_prod(cb: types.CallbackQuery):
             seller_block += f"💬 <b>Telegram:</b> @{un}\n"
 
     text = (
-        f"╔═══════════════════╗\n"
-        f"║ {ae('tag')} <b>{p['name']}</b>{short_id_s}\n"
-        f"╚═══════════════════╝\n\n"
+        f"{ae('sparkle')} <b>{p['name']}</b>{short_id_s}\n\n"
         f"<blockquote>{p['description']}</blockquote>\n\n"
         f"━━━━━━━━━━━━━━━━━\n"
         f"{ae('star')} {rating_s}\n"
-        f"{ae('money')} <b>Цена:</b>  <code>{fmt_price(p['price'])}</code>\n"
+        f"{ae('cash')} <b>Цена:</b>  <code>{fmt_price(p['price'])}</code>\n"
         f"{ae('size')} <b>Размеры:</b>  {sizes_s}\n"
-        f"{ae('box')} <b>Статус:</b>  {stock_s}\n"
+        f"{ae('ok') if stock > 0 else ae('no')} <b>Статус:</b>  {stock_s}\n"
         f"{seller_block}"
         f"━━━━━━━━━━━━━━━━━"
     )
@@ -1994,13 +2576,28 @@ async def cb_prod(cb: types.CallbackQuery):
         gallery = []
 
     kb_rows = []
+    uid = cb.from_user.id
+
+    # Динамические метки кнопок на основе состояния
+    in_cart = await cart_has(uid, pid, 'ONE_SIZE') if not parse_sizes(p) else False
+    in_wish = await wish_has(uid, pid)
+
     if stock > 0:
-        kb_rows.append([InlineKeyboardButton(text="🛒 Купить", callback_data=f"buy_{pid}")])
+        buy_label = f"{ae('cart')} Купить сейчас"
+        kb_rows.append([InlineKeyboardButton(text=buy_label, callback_data=f"buy_{pid}")])
+
+    cart_label = f"{ae('ok')} В корзине" if in_cart else f"{ae('cart')} В корзину"
+    wish_label = f"❤️ В избранном" if in_wish else f"{ae('heart_w')} В избранное"
+    kb_rows.append([
+        InlineKeyboardButton(text=cart_label, callback_data=f"cart_add_{pid}"),
+        InlineKeyboardButton(text=wish_label, callback_data=f"wish_toggle_{pid}"),
+    ])
+
     if gallery:
         kb_rows.append([InlineKeyboardButton(
             text=f"🖼 Галерея ({len(gallery)})", callback_data=f"gallery_{pid}_0"
         )])
-    kb_rows.append([InlineKeyboardButton(text="⭐ Отзывы", callback_data=f"reviews_{pid}")])
+    kb_rows.append([InlineKeyboardButton(text=f"{ae('star')} Отзывы", callback_data=f"reviews_{pid}")])
     # Back button: go to category
     cat = await get_category(p['category_id']) if p.get('category_id') else None
     back_cd = f"cat_{p['category_id']}" if p.get('category_id') else "shop"
@@ -2486,18 +3083,21 @@ async def cb_chk(cb: types.CallbackQuery):
     if promo_code:
         promo_msg = f"🎟 Промокод: <code>{promo_code}</code>\n"
     if discount > 0:
-        promo_msg += f"💰 Скидка: {fmt_price(discount)}\n"
+        promo_msg += f"{ae('cash')} Скидка: {fmt_price(discount)}\n"
 
     await bot.send_message(uid,
-        f"🎉 <b>Оплата подтверждена! Заказ #{oid} оформлен.</b>\n\n"
-        f"{ae('box')} {product['name']}  ({size})\n"
-        f"{ae('money')} {fmt_price(price)}\n"
+        f"{ae('confetti')} <b>Оплата подтверждена!</b>\n"
+        f"{ae('note')} <b>Заказ #{oid} оформлен</b>\n\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"{ae('bag')} {product['name']}  ({size})\n"
+        f"{ae('cash')} {fmt_price(price)}\n"
         f"{promo_msg}"
         f"{ae('phone')} {user['phone']}\n"
-        f"{ae('pin')} {user['default_address']}\n\n"
-        f"{ae('gift')} Кэшбэк: <b>{fmt_price(bonus)}</b> на бонусный счёт\n"
+        f"{ae('pin')} {user['default_address']}\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"{ae('coin')} Кэшбэк: <b>{fmt_price(bonus)}</b> на бонусный счёт\n"
         f"{ref_bonus_msg}"
-        f"\n<blockquote>Мы свяжемся с вами для согласования доставки.</blockquote>",
+        f"\n<blockquote>{ae('bell')} Мы свяжемся с вами для согласования доставки.</blockquote>",
         parse_mode="HTML", reply_markup=kb_main()
     )
     await cb.answer("✅ Готово!")
@@ -2684,17 +3284,20 @@ async def cb_kapprove(cb: types.CallbackQuery):
     if promo_code:
         promo_msg = f"🎟 Промокод: <code>{promo_code}</code>\n"
     if discount > 0:
-        promo_msg += f"💰 Скидка: {fmt_price(discount)}\n"
+        promo_msg += f"{ae('cash')} Скидка: {fmt_price(discount)}\n"
 
     try:
         await bot.send_message(kp['user_id'],
-            f"✅ <b>Оплата подтверждена! Заказ #{oid} оформлен.</b>\n\n"
-            f"{ae('box')} {product['name']}  ({size})\n"
-            f"{ae('money')} {fmt_price(kp['amount'])}\n"
+            f"{ae('confetti')} <b>Оплата подтверждена!</b>\n"
+            f"{ae('note')} <b>Заказ #{oid} оформлен</b>\n\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            f"{ae('bag')} {product['name']}  ({size})\n"
+            f"{ae('cash')} {fmt_price(kp['amount'])}\n"
             f"{promo_msg}"
-            f"{ae('gift')} Кэшбэк: <b>{fmt_price(bonus)}</b>\n\n"
-            f"<blockquote>Ожидайте уведомлений о статусе доставки!</blockquote>",
-            parse_mode="HTML"
+            f"{ae('coin')} Кэшбэк: <b>{fmt_price(bonus)}</b>\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            f"<blockquote>{ae('bell')} Ожидайте уведомлений о статусе доставки!</blockquote>",
+            parse_mode="HTML", reply_markup=kb_main()
         )
     except Exception:
         pass
@@ -2882,20 +3485,20 @@ async def cb_setordst(cb: types.CallbackQuery):
     try:
         if status == "delivered":
             await bot.send_message(order['user_id'],
-                f"🚚 <b>Ваш заказ #{oid} доставлен!</b>\n\n"
-                f"{ae('box')} {pname} {short} ({order['size']})\n\n"
-                f"<blockquote>Пожалуйста, подтвердите получение:</blockquote>",
+                f"{ae('truck')} <b>Ваш заказ #{oid} доставлен!</b>\n\n"
+                f"{ae('bag')} {pname} {short} ({order['size']})\n\n"
+                f"<blockquote>{ae('ok')} Пожалуйста, подтвердите получение:</blockquote>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="✅ Подтверждаю получение",
+                    InlineKeyboardButton(text=f"{ae('ok')} Подтверждаю получение",
                                          callback_data=f"confirm_order_{oid}")
                 ]])
             )
         else:
             await bot.send_message(order['user_id'],
-                f"{ae('truck')} <b>Статус заказа #{oid} обновлён</b>\n\n"
-                f"{ae('box')} {pname} {short} ({order['size']})\n"
-                f"🔄 <b>Новый статус:</b> {order_status_text(status)}",
+                f"{ae('bell')} <b>Статус заказа #{oid} обновлён</b>\n\n"
+                f"{ae('bag')} {pname} {short} ({order['size']})\n"
+                f"{ae('refresh')} <b>Новый статус:</b> {order_status_text(status)}",
                 parse_mode="HTML"
             )
     except Exception:
