@@ -1268,51 +1268,46 @@ def order_status_text(status: str) -> str:
 def kb_main():
     """Главное инлайн-меню. Больше нет Reply-клавиатуры — всё через инлайн."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"Каталог", callback_data="shop", icon_custom_emoji_id="5373052667671093676"),
-         InlineKeyboardButton(text=f"Профиль", callback_data="profile_view", icon_custom_emoji_id="5870994129244131212")],
-        [InlineKeyboardButton(text=f"Корзина", callback_data="my_cart", icon_custom_emoji_id="5431499171045581032"),
-         InlineKeyboardButton(text=f"Избранное", callback_data="my_wishlist", icon_custom_emoji_id="5449505950283078474")],
-        [InlineKeyboardButton(text=f"О магазине", callback_data="about", icon_custom_emoji_id="5873147866364514353"),
-         InlineKeyboardButton(text=f"Поддержка", callback_data="support", icon_custom_emoji_id="5467666648263564704")],
+        [kb_colored_action("shop", "shop"), kb_colored_action("profile", "profile_view")],
+        [kb_colored_action("cart", "my_cart"), kb_colored_action("wishlist", "my_wishlist")],
+        [kb_colored_action("about", "about"), kb_colored_action("support", "support")],
     ])
     """Возвращает инлайн-кнопку с цветом по типу действия."""
     color_map = {
         "delete": "5370810157871667232",   # Красная
         "cancel": "5370810157871667232",   # Красная
         "remove": "5370810157871667232",   # Красная
+        "clear":  "5370810157871667232",   # Красная
         "buy":    "5471984997361523302",   # Зелёная
         "add":    "5471984997361523302",   # Зелёная
         "confirm": "5471984997361523302",  # Зелёная
+        "pay":    "5471984997361523302",   # Зелёная
     }
     icon_id = color_map.get(action, "5870633910337015697")  # default: галочка
     return InlineKeyboardButton(text=f"{action.capitalize()}", callback_data=callback_data, icon_custom_emoji_id=icon_id)
     """Кнопки для корзины: оформить (зелёная), очистить (красная), назад."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [kb_colored_action("buy", "cart_checkout")],
-        [kb_colored_action("remove", "cart_clear_confirm")],
-        [InlineKeyboardButton(text="‹ Профиль", callback_data="profile_view", icon_custom_emoji_id="5870994129244131212")],
+        [kb_colored_action("clear", "cart_clear_confirm")],
+        [kb_colored_action("profile", "profile_view")],
     ])
 
 def kb_back(cd="main"):
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=f"‹ Назад", callback_data=cd, icon_custom_emoji_id="5893057118545646106")
-    ]])
+    return InlineKeyboardMarkup(inline_keyboard=[[kb_colored_action("cancel", cd)]])
 
 def kb_admin():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"Статистика", callback_data="adm_stats", icon_custom_emoji_id="5870921681735781843")],
-        [InlineKeyboardButton(text=f"🖼 Медиа", callback_data="adm_media", icon_custom_emoji_id="6035128606563241721"),
-         InlineKeyboardButton(text=f"📨 Рассылка", callback_data="adm_broadcast", icon_custom_emoji_id="6039422865189638057")],
-        [InlineKeyboardButton(text=f"Товары", callback_data="adm_products", icon_custom_emoji_id="5884479287171485878"),
-         InlineKeyboardButton(text=f"📁 Категории", callback_data="adm_cats", icon_custom_emoji_id="5870528606328852614")],
-        [InlineKeyboardButton(text=f"Заказы", callback_data="adm_orders", icon_custom_emoji_id="5890937706803894250")],
-        [InlineKeyboardButton(text=f"🎟 Промокоды", callback_data="adm_promos", icon_custom_emoji_id="5904462880941545555")],
-        [InlineKeyboardButton(text=f"👥 Пользователи", callback_data="adm_users", icon_custom_emoji_id="5870772616305839506")],
-        [InlineKeyboardButton(text=f"Партнёры", callback_data="adm_partners", icon_custom_emoji_id="5769289093221454192")],
-        [InlineKeyboardButton(text=f"🔥 Дропы", callback_data="adm_drops", icon_custom_emoji_id="5420315771991497307")],
-        [InlineKeyboardButton(text=f"Сообщения бота", callback_data="adm_botmsgs", icon_custom_emoji_id="5465300082628763143")],
-        [InlineKeyboardButton(text=f"📊 Лог (HTML)", callback_data="adm_log", icon_custom_emoji_id="5870930636742595124")],
-        [InlineKeyboardButton(text=f"Настройки", callback_data="adm_settings", icon_custom_emoji_id="5870982283724328568")],
+        [kb_colored_action("stats", "adm_stats")],
+        [kb_colored_action("media", "adm_media"), kb_colored_action("broadcast", "adm_broadcast")],
+        [kb_colored_action("products", "adm_products"), kb_colored_action("categories", "adm_cats")],
+        [kb_colored_action("orders", "adm_orders")],
+        [kb_colored_action("promos", "adm_promos")],
+        [kb_colored_action("users", "adm_users")],
+        [kb_colored_action("partners", "adm_partners")],
+        [kb_colored_action("drops", "adm_drops")],
+        [kb_colored_action("botmsgs", "adm_botmsgs")],
+        [kb_colored_action("log", "adm_log")],
+        [kb_colored_action("settings", "adm_settings")],
     ])
 
 def kb_admin_back():
