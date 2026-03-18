@@ -1265,14 +1265,37 @@ def order_status_text(status: str) -> str:
 # ══════════════════════════════════════════════
 #  Клавиатуры
 # ══════════════════════════════════════════════
-def kb_main():
-    """Главное инлайн-меню. Больше нет Reply-клавиатуры — всё через инлайн."""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [kb_colored_action("shop", "shop"), kb_colored_action("profile", "profile_view")],
-        [kb_colored_action("cart", "my_cart"), kb_colored_action("wishlist", "my_wishlist")],
-        [kb_colored_action("about", "about"), kb_colored_action("support", "support")],
-    ])
+def kb_colored_action(action: str, callback_data: str):
     """Возвращает инлайн-кнопку с цветом по типу действия."""
+    button_labels = {
+        "shop": "🛍 Купить",
+        "profile": "👤 Профиль",
+        "cart": "🛒 Корзина",
+        "wishlist": "❤️ Избранное",
+        "about": "🏬 О магазине",
+        "support": "❓ Поддержка",
+        "stats": "📊 Статистика",
+        "media": "📁 Медиа",
+        "broadcast": "📢 Рассылка",
+        "products": "🛍 Товары",
+        "categories": "📂 Категории",
+        "orders": "📦 Заказы",
+        "promos": "🎟 Промокоды",
+        "users": "👥 Пользователи",
+        "partners": "🤝 Партнёры",
+        "drops": "🔥 Дропы",
+        "botmsgs": "💬 Сообщения",
+        "log": "📋 Логи",
+        "settings": "⚙️ Настройки",
+        "buy": "✅ Оформить",
+        "clear": "🗑 Очистить",
+        "add": "➕ Добавить",
+        "confirm": "✅ Подтвердить",
+        "pay": "💳 Оплатить",
+        "delete": "🗑 Удалить",
+        "cancel": "❌ Отмена",
+        "remove": "🗑 Убрать",
+    }
     color_map = {
         "delete": "5370810157871667232",   # Красная
         "cancel": "5370810157871667232",   # Красная
@@ -1283,13 +1306,24 @@ def kb_main():
         "confirm": "5471984997361523302",  # Зелёная
         "pay":    "5471984997361523302",   # Зелёная
     }
+    text = button_labels.get(action, action.capitalize())
     icon_id = color_map.get(action, "5870633910337015697")  # default: галочка
-    return InlineKeyboardButton(text=f"{action.capitalize()}", callback_data=callback_data, icon_custom_emoji_id=icon_id)
+    return InlineKeyboardButton(text=text, callback_data=callback_data, icon_custom_emoji_id=icon_id)
+
+def kb_main():
+    """Главное инлайн-меню. Больше нет Reply-клавиатуры — всё через инлайн."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [kb_colored_action("shop", "shop"), kb_colored_action("profile", "profile_view")],
+        [kb_colored_action("cart", "my_cart"), kb_colored_action("wishlist", "my_wishlist")],
+        [kb_colored_action("about", "about"), kb_colored_action("support", "support")],
+    ])
+
+def kb_cart():
     """Кнопки для корзины: оформить (зелёная), очистить (красная), назад."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [kb_colored_action("buy", "cart_checkout")],
         [kb_colored_action("clear", "cart_clear_confirm")],
-        [kb_colored_action("profile", "profile_view")],
+        [InlineKeyboardButton(text="‹ Главное меню", callback_data="main", icon_custom_emoji_id="5873147866364514353")],
     ])
 
 def kb_back(cd="main"):
@@ -1771,7 +1805,7 @@ async def cb_cart_add(cb: types.CallbackQuery):
 
     # Показываем выбор размера
     kb_rows = [[InlineKeyboardButton(
-        text="{s}", callback_data=f"cart_size_{pid}_{s}"
+        text=f"{s}", callback_data=f"cart_size_{pid}_{s}"
     )] for s in sizes]
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data=f"prod_{pid}", icon_custom_emoji_id="5893057118545646106")])
     try:
@@ -2047,7 +2081,7 @@ async def _show_wishlist(uid: int, edit_msg=None, send_fn=None):
         kb_rows = []
         for i in items:
             kb_rows.append([
-                InlineKeyboardButton(text="{i['name']}", callback_data=f"prod_{i['product_id']}"),
+                InlineKeyboardButton(text=f"{i['name']}", callback_data=f"prod_{i['product_id']}"),
                 InlineKeyboardButton(text="Убрать",      callback_data=f"wish_rm_{i['product_id']}", icon_custom_emoji_id="5870657884844462243"),
             ])
         kb_rows.append([InlineKeyboardButton(text="‹ Профиль", callback_data="profile_view", icon_custom_emoji_id="5870994129244131212")])
@@ -2425,7 +2459,7 @@ async def show_catalog(chat_id: int):
     for c in cats:
         subcats = await get_categories(parent_id=c['id'])
         icon = ae('folder') if subcats else ae('shop')
-        kb_rows.append([InlineKeyboardButton(text="{icon} {c['name']}", callback_data=f"cat_{c['id']}")])
+        kb_rows.append([InlineKeyboardButton(text=f"{icon} {c['name']}", callback_data=f"cat_{c['id']}")])
     if drops or upcoming:
         kb_rows.append([InlineKeyboardButton(text="Дропы", callback_data="drops_menu", icon_custom_emoji_id="5420315771991497307")])
     kb_rows.append([InlineKeyboardButton(text="‹ Главное меню", callback_data="main", icon_custom_emoji_id="5873147866364514353")])
@@ -2445,7 +2479,7 @@ async def cb_shop(cb: types.CallbackQuery):
     for c in cats:
         subcats = await get_categories(parent_id=c['id'])
         icon = ae('folder') if subcats else ae('shop')
-        kb_rows.append([InlineKeyboardButton(text="{icon} {c['name']}", callback_data=f"cat_{c['id']}")])
+        kb_rows.append([InlineKeyboardButton(text=f"{icon} {c['name']}", callback_data=f"cat_{c['id']}")])
     if drops or upcoming:
         kb_rows.append([InlineKeyboardButton(text="Дропы", callback_data="drops_menu", icon_custom_emoji_id="5420315771991497307")])
     kb_rows.append([InlineKeyboardButton(text="‹ Главное меню", callback_data="main", icon_custom_emoji_id="5873147866364514353")])
@@ -2470,7 +2504,7 @@ async def cb_cat(cb: types.CallbackQuery):
     if subcats:
         kb_rows = []
         for sc in subcats:
-            kb_rows.append([InlineKeyboardButton(text="{sc['name']}", callback_data=f"cat_{sc['id']}")])
+            kb_rows.append([InlineKeyboardButton(text=f"{sc['name']}", callback_data=f"cat_{sc['id']}")])
         # Also show products directly in this category
         prods = await get_products(cid)
         for p in prods:
@@ -2681,7 +2715,7 @@ async def cb_gallery(cb: types.CallbackQuery):
     nav = []
     if idx > 0:
         nav.append(InlineKeyboardButton(text="◀️", callback_data=f"gallery_{pid}_{idx-1}", icon_custom_emoji_id="5893057118545646106"))
-    nav.append(InlineKeyboardButton(text="{idx+1}/{total}", callback_data="noop"))
+    nav.append(InlineKeyboardButton(text=f"{idx+1}/{total}", callback_data="noop"))
     if idx < total - 1:
         nav.append(InlineKeyboardButton(text="▶️", callback_data=f"gallery_{pid}_{idx+1}", icon_custom_emoji_id="5769289093221454192"))
 
@@ -2733,7 +2767,7 @@ async def cb_buy(cb: types.CallbackQuery):
         await _show_payment_confirm(cb, pid, "ONE_SIZE")
         return
 
-    kb_rows = [[InlineKeyboardButton(text="{s}", callback_data=f"size_{pid}_{s}")] for s in sizes]
+    kb_rows = [[InlineKeyboardButton(text=f"{s}", callback_data=f"size_{pid}_{s}")] for s in sizes]
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data=f"prod_{pid}", icon_custom_emoji_id="5893057118545646106")])
 
     text = (f"{ae('size')} <b>Выберите размер</b>\n\n"
@@ -4575,8 +4609,8 @@ async def cb_adm_cats(cb: types.CallbackQuery):
     for c in cats:
         parent_mark = f" ↳" if c.get('parent_id', 0) else ""
         kb_rows.append([
-            InlineKeyboardButton(text="{parent_mark} {c['name']}", callback_data=f"ecat_{c['id']}"),
-            InlineKeyboardButton(text=" ", callback_data=f"dcat_{c['id']}"),
+            InlineKeyboardButton(text=f"{parent_mark} {c['name']}", callback_data=f"ecat_{c['id']}"),
+            InlineKeyboardButton(text="🗑", callback_data=f"dcat_{c['id']}"),
         ])
     kb_rows.append([InlineKeyboardButton(text="Добавить категорию", callback_data="addcat", icon_custom_emoji_id="5870633910337015697")])
     kb_rows.append([InlineKeyboardButton(text="Добавить подкатегорию", callback_data="addsubcat", icon_custom_emoji_id="5870633910337015697")])
@@ -4598,7 +4632,7 @@ async def cb_addsubcat(cb: types.CallbackQuery, state: FSMContext):
     if not cats:
         await cb.answer("Сначала создайте родительскую категорию!", show_alert=True)
         return
-    kb_rows = [[InlineKeyboardButton(text="{c['name']}", callback_data=f"subcat_parent_{c['id']}")] for c in cats]
+    kb_rows = [[InlineKeyboardButton(text=f"{c['name']}", callback_data=f"subcat_parent_{c['id']}")] for c in cats]
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_cats", icon_custom_emoji_id="5893057118545646106")])
     try:
         await cb.message.edit_text("📂 <b>Выберите родительскую категорию:</b>",
@@ -4669,7 +4703,7 @@ async def cb_adm_products(cb: types.CallbackQuery):
         return
     cats    = await get_categories()
     kb_rows = [[InlineKeyboardButton(
-        text="{c['name']}", callback_data=f"apcat_{c['id']}"
+        text=f"{c['name']}", callback_data=f"apcat_{c['id']}"
     )] for c in cats]
     kb_rows.append([InlineKeyboardButton(text="Добавить товар", callback_data="addprod", icon_custom_emoji_id="5884479287171485878")])
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_panel", icon_custom_emoji_id="5893057118545646106")])
@@ -4869,7 +4903,7 @@ async def cb_addprod(cb: types.CallbackQuery, state: FSMContext):
     for c in all_cats:
         parent_mark = "  ↳ " if c.get('parent_id', 0) else ""
         kb.append([InlineKeyboardButton(
-            text="{parent_mark}{c['name']}",
+            text=f"{parent_mark}{c['name']}",
             callback_data=f"npcat_{c['id']}"
         )])
     kb.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_products", icon_custom_emoji_id="5893057118545646106")])
@@ -5692,7 +5726,7 @@ async def cb_adm_roles(cb: types.CallbackQuery):
         uname = f"@{r['username']}" if r.get('username') else str(r['user_id'])
         rlabel = ROLES.get(r['role'], r['role'])
         kb_rows.append([InlineKeyboardButton(
-            text="{rlabel} — {uname}",
+            text=f"{rlabel} — {uname}",
             callback_data=f"adm_role_edit_{r['user_id']}"
         )])
     kb_rows.append([InlineKeyboardButton(text="Назначить роль", callback_data="adm_role_assign", icon_custom_emoji_id="5870633910337015697")])
@@ -5741,7 +5775,7 @@ async def proc_role_user_id(msg: types.Message, state: FSMContext):
     for role_key, role_label in ROLES.items():
         mark = "✓ " if current_role == role_key else ""
         kb_rows.append([InlineKeyboardButton(
-            text="{mark}{role_label}",
+            text=f"{mark}{role_label}",
             callback_data=f"setrole_{uid}_{role_key}"
         )])
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_roles", icon_custom_emoji_id="5893057118545646106")])
@@ -5794,7 +5828,7 @@ async def cb_adm_role_edit(cb: types.CallbackQuery):
     for role_key, role_label in ROLES.items():
         mark = "✓ " if current_role == role_key else ""
         kb_rows.append([InlineKeyboardButton(
-            text="{mark}{role_label}",
+            text=f"{mark}{role_label}",
             callback_data=f"setrole_{uid}_{role_key}"
         )])
     kb_rows.append([InlineKeyboardButton(text="‹ Назад к пользователю", callback_data=f"adm_user_{uid}", icon_custom_emoji_id="5893057118545646106")])
@@ -5977,8 +6011,8 @@ async def cb_adm_drops(cb: types.CallbackQuery):
         now    = datetime.now().isoformat()
         status = "🔥" if (d['is_active'] and d['start_at'] <= now) else ("⏳" if d['is_active'] else "❌")
         kb_rows.append([
-            InlineKeyboardButton(text="{status} {d['name']}", callback_data=f"adm_drop_{d['id']}"),
-            InlineKeyboardButton(text=" ", callback_data=f"del_drop_{d['id']}"),
+            InlineKeyboardButton(text=f"{status} {d['name']}", callback_data=f"adm_drop_{d['id']}"),
+            InlineKeyboardButton(text="🗑", callback_data=f"del_drop_{d['id']}"),
         ])
     kb_rows.append([InlineKeyboardButton(text="Добавить дроп", callback_data="add_drop", icon_custom_emoji_id="5420315771991497307")])
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_panel", icon_custom_emoji_id="5893057118545646106")])
@@ -6007,7 +6041,7 @@ async def cb_add_drop(cb: types.CallbackQuery, state: FSMContext):
     if not admin_guard(cb.from_user.id):
         return
     cats = await get_all_categories()
-    kb_rows = [[InlineKeyboardButton(text="{c['name']}", callback_data=f"drop_cat_{c['id']}")] for c in cats]
+    kb_rows = [[InlineKeyboardButton(text=f"{c['name']}", callback_data=f"drop_cat_{c['id']}")] for c in cats]
     kb_rows.append([InlineKeyboardButton(text="‹ Назад", callback_data="adm_drops", icon_custom_emoji_id="5893057118545646106")])
     try:
         await cb.message.edit_text(
@@ -6224,4 +6258,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-# 
+#
